@@ -1,0 +1,28 @@
+{
+  "login": {
+    "email_placeholder": "Email",
+    "password_placeholder": "Senha",
+    "login_button": "Entrar",
+    "register_link": "Não tem uma conta? Cadastre-se"
+  },
+  "register": {
+    "email_placeholder": "Email",
+    "password_placeholder": "Senha",
+    "register_button": "Cadastrar",
+    "login_link": "Já tem uma conta? Entrar"
+  },
+  "chat": {
+    "placeholder": "Digite sua mensagem...",
+    "send_button": "Enviar"
+  },
+  "tabs": {
+    "profile": "Perfil",
+    "feed": "Feed",
+    "conversas": "Conversas"
+  },
+  "Camera": {
+    "profile": "Perfil",
+    "feed": "Feed",
+    "conversas": "Conversas"
+  }
+}

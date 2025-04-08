@@ -1,0 +1,23 @@
+{
+  "login": {
+    "email_placeholder": "Email",
+    "password_placeholder": "Password",
+    "login_button": "Login",
+    "register_link": "Don't have an account? Register"
+  },
+  "register": {
+    "email_placeholder": "Email",
+    "password_placeholder": "Password",
+    "register_button": "Register",
+    "login_link": "Already have an account? Login"
+  },
+  "chat": {
+    "placeholder": "Type your message...",
+    "send_button": "Send"
+  },
+  "tabs": {
+    "profile": "Profile",
+    "feed": "Feed",
+    "conversas": "Chat"
+  }
+}
