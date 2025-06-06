@@ -30,6 +30,8 @@ import { Colors } from '@/constants/Colors';
 import ImageDisplay from '@/components/ImageDisplay';
 import { getCachedImage, cacheImage } from '@/utils/imageCache';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Background } from '@react-navigation/elements';
+import { ThemeContext } from '@react-navigation/native';
 
 interface Comment {
   userId: string;
@@ -40,15 +42,17 @@ interface Comment {
 interface Post {
   id: string;
   userId: string;
+  username: string;
+  content: string;
   text: string;
   timestamp: number;
   likes: Record<string, boolean>;
   comments: Record<string, Comment>;
-  imageId: string | null;
+  imageBase64: string | null;
 }
 
 interface User {
-  id: string;
+  uid: string;
   user: string;
   email: string;
 }
@@ -73,11 +77,12 @@ interface ImageData {
 interface FormattedPost {
   id: string;
   username: string;
+  userId: string;
   time: string;
   content: string;
   likes: Record<string, boolean>;
   comments: Record<string, Comment>;
-  imageId: string | null;
+  imageBase64: string | null;
   timestamp: number;
 }
 
@@ -103,6 +108,7 @@ const screenHeight = Dimensions.get('screen').height;
 
 const imageSize = Math.min(windowWidth, windowHeight * 0.8);
 const postWidth = windowWidth - 32; // 16px de padding em cada lado
+const posheight = windowHeight / 4;
 const aspectRatio = 1; // Proporção quadrada
 
 const FastShiiiScreen = () => {
@@ -130,6 +136,7 @@ const FastShiiiScreen = () => {
   const [posting, setPosting] = useState(false);
   const [moreOptionsVisible, setMoreOptionsVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [pagination, setPagination] = useState<PaginationState>({
     lastVisible: null,
     hasMore: true,
@@ -168,7 +175,15 @@ const FastShiiiScreen = () => {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem('user');
-    router.replace('/login');
+
+    Alert.alert(
+      'Sair da conta',
+      'Tem certeza que deseja sair?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
+      ]
+    );
   };
 
   const handleImagePicker = async () => {
@@ -223,45 +238,32 @@ const FastShiiiScreen = () => {
     setPosting(true);
 
     try {
-      let imageId = null;
+      let imageBase64 = null;
 
       if (selectedImage) {
+        // Apenas converte para JPEG e base64, sem crop ou resize
         const compressedImage = await ImageManipulator.manipulateAsync(
           selectedImage,
-          [
-            { resize: { width: Math.min(1080, windowWidth * 2) } }, // Limitar largura máxima
-            { crop: { 
-              originX: 0, 
-              originY: 0, 
-              width: Math.min(1080, windowWidth * 2), 
-              height: Math.min(1080, windowWidth * 2) 
-            } }, // Forçar proporção quadrada
-          ],
+          [],
           { 
             format: ImageManipulator.SaveFormat.JPEG,
             base64: true
           }
         );
-
         if (compressedImage.base64) {
-        const fotoData = {
-            base64: compressedImage.base64,
-          timestamp: Date.now(),
-        };
-        const docRef = await addDoc(collection(firestore, 'fotos'), fotoData);
-        imageId = docRef.id;
-          
-          await cacheImage(imageId, compressedImage.base64);
+          imageBase64 = compressedImage.base64;
         }
       }
 
       const postData: Omit<Post, 'id'> = {
-        userId: user.id,
+        userId: user.uid,
+        username: user.user,
+        content: inputText || '',
         text: inputText || '',
         timestamp: Date.now(),
         likes: {},
         comments: {},
-        imageId: imageId,
+        imageBase64: imageBase64,
       };
 
       const postDocRef = await addDoc(collection(firestore, 'posts'), postData);
@@ -273,7 +275,7 @@ const FastShiiiScreen = () => {
       setCreatePostModalVisible(false);
     } catch (error: any) {
       console.error('Erro ao adicionar postagem:', error.message);
-      Alert.alert('Erro', 'Erro ao adicionar postagem: ' + error.message);
+      Alert.alert('Erro vai se foder', 'Erro ao adicionar postagem:  ' + error.message);
     } finally {
       setPosting(false);
     }
@@ -370,46 +372,44 @@ const FastShiiiScreen = () => {
       }));
 
       // Buscar usuários em paralelo
-        const users = await fetchUsers();
+      const users = await fetchUsers() as User[];
       
       // Formatar posts com informações de usuário e tempo
       const formattedPosts = newPosts.map((post: Post): FormattedPost => {
-        const user = users.find((u: User) => u.id === post.userId) || { 
-          id: '', 
-          user: 'Usuário Desconhecido', 
-          email: '' 
-        };
+        const user = users.find((u: User) => u.uid === post.userId);
+        const username = user?.user || 'Usuário Desconhecido';
 
-          const postTime = new Date(post.timestamp);
-          const currentTime = new Date();
+        const postTime = new Date(post.timestamp);
+        const currentTime = new Date();
         const timeDifference = Math.floor((currentTime.getTime() - postTime.getTime()) / 1000);
 
-          let timeString = '';
-          if (timeDifference < 60) {
-            timeString = `${timeDifference} segundos atrás`;
-          } else if (timeDifference < 3600) {
-            timeString = `${Math.floor(timeDifference / 60)} minutos atrás`;
-          } else if (timeDifference < 86400) {
-            timeString = `${Math.floor(timeDifference / 3600)} horas atrás`;
-          } else {
-            timeString = `${Math.floor(timeDifference / 86400)} dias atrás`;
-          }
+        let timeString = '';
+        if (timeDifference < 60) {
+          timeString = `${timeDifference} segundos atrás`;
+        } else if (timeDifference < 3600) {
+          timeString = `${Math.floor(timeDifference / 60)} minutos atrás`;
+        } else if (timeDifference < 86400) {
+          timeString = `${Math.floor(timeDifference / 3600)} horas atrás`;
+        } else {
+          timeString = `${Math.floor(timeDifference / 86400)} dias atrás`;
+        }
 
-          return {
-            id: post.id,
-            username: user.user,
+        return {
+          id: post.id,
+          userId: post.userId,
+          username: username,
           time: timeString,
-            content: post.text,
+          content: post.text,
           likes: post.likes || {},
           comments: post.comments || {},
-          imageId: post.imageId || null,
+          imageBase64: post.imageBase64 || null,
           timestamp: post.timestamp,
-          };
-        });
+        };
+      });
 
       // Ordenar posts baseado na escolha do usuário
       const sortedPosts = choiceChipsValue === 'Populares'
-            ? formattedPosts.sort((a, b) => {
+        ? formattedPosts.sort((a, b) => {
             const aScore = (Object.keys(a.likes).length + Object.keys(a.comments).length) / 2;
             const bScore = (Object.keys(b.likes).length + Object.keys(b.comments).length) / 2;
             return bScore - aScore;
@@ -417,15 +417,15 @@ const FastShiiiScreen = () => {
         : formattedPosts.sort((a, b) => b.timestamp - a.timestamp);
 
       if (isInitialLoad) {
-        setPosts(sortedPosts);
+        setPosts(sortedPosts as unknown as Post[]);
       } else {
-        setPosts(prev => [...prev, ...sortedPosts]);
+        setPosts(prev => [...prev, ...sortedPosts] as unknown as Post[]);
       }
 
       // Carregar imagens em background
       const imageIds = newPosts
-        .filter(post => post.imageId)
-        .map(post => post.imageId as string);
+        .filter(post => post.imageBase64)
+        .map(post => post.imageBase64 as string);
 
       if (imageIds.length > 0) {
         fetchImagesWithCache().then(cachedImages => {
@@ -492,15 +492,15 @@ const FastShiiiScreen = () => {
 
     try {
       const postRef = doc(firestore, 'posts', postId);
-      const isLiked = posts.find((post) => post.id === postId)?.likes[user.id];
+      const isLiked = posts.find((post) => post.id === postId)?.likes[user.uid];
 
       if (isLiked) {
         await updateDoc(postRef, {
-          [`likes.${user.id}`]: false,
+          [`likes.${user.uid}`]: false,
         });
       } else {
         await updateDoc(postRef, {
-          [`likes.${user.id}`]: true,
+          [`likes.${user.uid}`]: true,
         });
       }
 
@@ -511,7 +511,7 @@ const FastShiiiScreen = () => {
                 ...post,
                 likes: {
                   ...post.likes,
-                  [user.id]: !isLiked,
+                  [user.uid]: !isLiked,
                 },
               }
             : post
@@ -536,11 +536,11 @@ const FastShiiiScreen = () => {
 
     try {
       const postRef = doc(firestore, 'posts', postId);
-      const commentId = `${user.id}_${Date.now()}`;
+      const commentId = `${user.uid}_${Date.now()}`;
 
       await updateDoc(postRef, {
         [`comments.${commentId}`]: {
-          userId: user.id,
+          userId: user.uid,
           text: commentText,
           timestamp: Date.now(),
         },
@@ -554,7 +554,7 @@ const FastShiiiScreen = () => {
                 comments: {
                   ...post.comments,
                   [commentId]: {
-                    userId: user.id,
+                    userId: user.uid,
                     text: commentText,
                     timestamp: Date.now(),
                   },
@@ -610,13 +610,15 @@ const FastShiiiScreen = () => {
     }
   };
 
-  const handleUsernamePress = (username: string) => {
+  const handleUsernamePress = (username: string, userId: string) => {
     setSelectedUser(username);
+    console.log(userId);
+    setSelectedUserId(userId);
     setProfileModalVisible(true);
   };
 
   const renderPost = ({ item }: { item: FormattedPost }) => {
-    const isLiked = user?.id ? !!item.likes[user.id] : false;
+    const isLiked = user?.uid ? !!item.likes[user.uid] : false;
     const likeCount = Object.keys(item.likes || {}).filter((key) => item.likes[key]).length;
     const commentCount = Object.keys(item.comments || {}).length;
 
@@ -629,7 +631,7 @@ const FastShiiiScreen = () => {
       >
         <View style={[styles.postContainer, { backgroundColor: themeColors.background }]}>
           <View style={styles.postHeader}>
-            <TouchableOpacity onPress={() => handleUsernamePress(item.username)}>
+            <TouchableOpacity onPress={() => handleUsernamePress(item.username, item.userId)}>
               <Text style={[styles.postUsername, { color: themeColors.tint }]}>{item.username}</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -639,10 +641,10 @@ const FastShiiiScreen = () => {
               <Ionicons name="ellipsis-vertical" size={20} color={themeColors.googleButton} />
             </TouchableOpacity>
           </View>
-          {item.imageId && (
+          {item.imageBase64 && (
             <View style={styles.imageContainer}>
-              <ImageDisplay 
-                imageId={item.imageId} 
+              <Image 
+                source={{ uri: `data:image/jpeg;base64,${item.imageBase64}` }}
                 style={styles.postImage}
                 resizeMode="cover"
               />
@@ -706,7 +708,7 @@ const FastShiiiScreen = () => {
 
   const Chip: React.FC<ChipProps> = ({ label, selected, onPress }) => (
     <TouchableOpacity
-      style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
+      style={[styles.chip, selected ? {backgroundColor: themeColors.tint } : styles.chipUnselected]}
       onPress={onPress}
     >
       <Text style={selected ? styles.chipTextSelected : styles.chipTextUnselected}>
@@ -851,7 +853,7 @@ const FastShiiiScreen = () => {
           {/* Corpo da tela */}
           <View style={styles.body}>
             {/* Campo de Input */}
-          <View style={[styles.inputContainer, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+          <View style={[styles.inputContainer, { backgroundColor: themeColors.backgroundfraco }]}>
               <TextInput
                 style={[
                   styles.input,
@@ -860,7 +862,7 @@ const FastShiiiScreen = () => {
                 value={inputText}
                 onChangeText={setInputText}
                 placeholder="Compartilhe seus pensamentos..."
-              placeholderTextColor={'rgba(255,255,255,0.5)'}
+              placeholderTextColor={themeColors.textSearch}
               />
               <TouchableOpacity
               style={[styles.addButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
@@ -912,20 +914,20 @@ const FastShiiiScreen = () => {
           </View>
 
         {/* Modal para adicionar nova postagem */}
-        <Modal visible={createPostModalVisible} transparent={true} animationType="slide">
+        <Modal visible={createPostModalVisible} transparent={false} animationType="slide">
           <TouchableOpacity
             style={styles.modalOverlay}
             activeOpacity={1}
             onPress={() => setCreatePostModalVisible(false)}
           >
             <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
-              <Text style={[styles.modalTitle, { color: '#fff' }]}>Nova Postagem</Text>
+              <Text style={[styles.modalTitle, { color: themeColors.textSearch }]}>Nova Postagem</Text>
               <TextInput
                 style={[
                   styles.modalInput,
                   { 
-                    backgroundColor: 'rgba(255,255,255,0.05)',
-                    color: '#fff',
+                    backgroundColor: themeColors.backgroundfraco,
+                    color: themeColors.textSearch,
                     borderColor: 'rgba(255,255,255,0.1)'
                   }
                 ]}
@@ -963,10 +965,10 @@ const FastShiiiScreen = () => {
                       <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Postar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.modalActionButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
+                      style={[styles.modalActionButton, { backgroundColor: themeColors.backgroundfraco }]}
                       onPress={() => setCreatePostModalVisible(false)}
                     >
-                      <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Cancelar</Text>
+                      <Text style={[styles.modalActionButtonText, { color: themeColors.textSearch }]}>Cancelar</Text>
                     </TouchableOpacity>
         </>
       )}
@@ -1013,28 +1015,26 @@ const FastShiiiScreen = () => {
                   <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>
                     {selectedPost.username}
                   </Text>
-                  <Text style={[styles.modalTime, { color: themeColors.googleButton }]}>
-                    {selectedPost.time}
-                  </Text>
                   <Text style={[styles.modalText, { color: themeColors.googleButton }]}>
                     {selectedPost.content}
                   </Text>
-                {selectedPost.imageId && (
-                  <ImageDisplay
-                    imageId={selectedPost.imageId}
-                    style={styles.dynamicImage}
-                  />
-                )}
-                <View style={styles.modalFooter}>
+                  {selectedPost.imageBase64 && (
+                    <Image
+                      source={{ uri: `data:image/jpeg;base64,${selectedPost.imageBase64}` }}
+                      style={styles.dynamicImage}
+                      resizeMode="cover"
+                    />
+                  )}
+                  <View style={styles.modalFooter}>
                     <Text style={[styles.modalLikes, { color: themeColors.googleButton }]}>
                       Curtidas: {Object.keys(selectedPost.likes).filter((key) => selectedPost.likes[key]).length}
                     </Text>
                     <Text style={[styles.modalComments, { color: themeColors.googleButton }]}>
                       Comentários: {Object.keys(selectedPost.comments).length}
                     </Text>
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1070,7 +1070,7 @@ const FastShiiiScreen = () => {
                 onPress={() => {
                   router.push({
                     pathname: `/SubTelas/perfil_outros`,
-                    params: { usernome: selectedUser },
+                    params: { userid: selectedUserId as string },
                   });
                   setProfileModalVisible(false);
                 }}
@@ -1263,9 +1263,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 4,
     elevation: 4,
-  },
-  chipSelected: {
-    backgroundColor: '#ff5500',
   },
   chipUnselected: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -1583,8 +1580,10 @@ const styles = StyleSheet.create({
   },
   dynamicImage: {
     width: postWidth,
-    height: postWidth * aspectRatio,
+    height: posheight * aspectRatio,
+    marginBottom: 10 ,
     backgroundColor: 'transparent',
+    borderRadius: 10,
   },
   loadingMoreIndicator: {
     paddingVertical: 16,
@@ -1641,5 +1640,11 @@ const styles = StyleSheet.create({
   floatingUsernameText: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
   },
 });

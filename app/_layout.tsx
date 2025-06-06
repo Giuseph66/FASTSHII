@@ -82,6 +82,20 @@ export default function RootLayout() {
             animation: 'slide_from_right'
           }} 
         />
+        <Stack.Screen 
+          name="SubTelas/post_details" 
+          options={{ 
+            headerShown: false,
+            animation: 'slide_from_right'
+          }} 
+        />
+        <Stack.Screen 
+          name="SubTelas/contrato_anuncio" 
+          options={{ 
+            headerShown: false,
+            animation: 'slide_from_right'
+          }} 
+        />
       </Stack>
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>

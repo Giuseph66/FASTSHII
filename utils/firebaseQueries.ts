@@ -8,7 +8,7 @@ export async function fetchUsers() {
     const querySnapshot = await getDocs(usersRef);
 
     const users = querySnapshot.docs.map(doc => ({
-      id: doc.id,
+      uid: doc.id,
       ...doc.data(),
     }));
 

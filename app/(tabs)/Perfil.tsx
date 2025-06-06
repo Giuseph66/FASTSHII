@@ -11,7 +11,8 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions
+  Dimensions,
+  Alert
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -24,7 +25,7 @@ const Profile15Screen = () => {
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-  const [user, setUser] = useState({ username: '', email: '' });
+  const [user, setUser] = useState({ username: '', email: '', uid: '' });
   const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [blockedUsersModalVisible, setBlockedUsersModalVisible] = useState(false);
@@ -92,7 +93,7 @@ const Profile15Screen = () => {
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.optionsContainer}>
+        <ScrollView contentContainerStyle={[styles.optionsContainer, {paddingBottom: 100}]}>
           <TouchableOpacity
             style={[styles.optionCard, { backgroundColor: themeColors.background }]}
             onPress={handleEditProfile}
@@ -119,10 +120,42 @@ const Profile15Screen = () => {
             <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Bloqueio de usuários</Text>
             <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+            onPress={() => router.push({
+              pathname: '/SubTelas/contrato_anuncio',
+              params: { userid: user.uid }
+            })}
+          >
+            <Ionicons name="person-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
+            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Contrato de anúncio</Text>
+            <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
+          </TouchableOpacity>
+        
+          <TouchableOpacity
+            style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+            onPress={() => router.push({
+              pathname: '/SubTelas/perfil_outros',
+              params: { userid: user.uid }
+            })}
+          >
+            <Ionicons name="person-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
+            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Perfil de geral</Text>
+            <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.logoutButton, { backgroundColor: themeColors.background }]}
-            onPress={() => router.replace('/login')}
+            onPress={() => {
+              Alert.alert(
+                'Sair da conta',
+                'Tem certeza que deseja sair?',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
+                ]
+              );
+            }}
           >
             <Ionicons name="log-out-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
             <Text style={[styles.logoutButtonText, { color: themeColors.tint }]}>Sair</Text>
@@ -260,7 +293,7 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 20
   },
   optionCard: {
     flexDirection: 'row',

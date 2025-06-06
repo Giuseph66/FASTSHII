@@ -7,6 +7,7 @@ import translations from '@/locales/translations';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Idioma atual
 const currentLanguage = 'pt'; // Altere para 'en' para inglês
@@ -18,22 +19,26 @@ interface TabBarIconProps {
 }
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme(); // Detect system theme
   const themeColors = Colors[colorScheme ?? 'light']; // Select theme colors
 
-  // Estilo customizado para a tab bar fixa na parte inferior
+
   const tabBarStyle = {
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: themeColors.background, // Use dynamic background color
-    marginHorizontal: 16,
-    marginBottom: 16,
-    shadowColor: themeColors.text, // Use dynamic shadow color
+    backgroundColor: themeColors.background,
+    paddingBottom: insets.bottom,
+    shadowColor: themeColors.text,
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 5 },
     shadowRadius: 10,
     elevation: 5,
+    alignSelf: 'center',
+    width: '100%',
+    position: 'absolute',
+    bottom: 0,
   };
+  
+
 
   // Função auxiliar para renderizar o ícone com efeito dinâmico
   const renderTabIcon = (iconSource: any) => ({ color, size, focused }: TabBarIconProps) => (
@@ -47,10 +52,11 @@ export default function TabLayout() {
         padding: focused ? 6 : 0,
         borderRadius: focused ? size : 0,
         backgroundColor: focused ? themeColors.background : 'transparent',
+        marginTop: 10,
       }}>
       <Image
         source={iconSource}
-        style={{ width: size, height: size, tintColor: color }}
+        style={{ width: size*1.2, height: size*1.2, tintColor: color }}
       />
     </View>
   );
@@ -59,14 +65,25 @@ export default function TabLayout() {
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <LinearGradient
         colors={[themeColors.background, themeColors.background]}
-        style={styles.gradient}
+        style={[styles.gradient, { paddingBottom: insets.bottom }]}
       >
         <Tabs
+
           screenOptions={{
-            tabBarActiveTintColor: themeColors.tint, // Use dynamic tint color
+            tabBarActiveTintColor: themeColors.tint,
             headerShown: false,
             tabBarButton: HapticTab,
             tabBarBackground: TabBarBackground,
+            tabBarLabelStyle: {
+              fontSize: 13,
+              fontWeight: 'bold',
+              marginTop: 10, 
+            },
+            tabBarItemStyle: {
+              justifyContent: 'center',  // centraliza verticalmente
+              alignItems: 'center',      // centraliza horizontalmente
+              marginTop: 10, 
+            },
             tabBarStyle: Platform.select({
               ios: tabBarStyle,
               default: tabBarStyle,
@@ -91,13 +108,6 @@ export default function TabLayout() {
             options={{
               title: translations[currentLanguage].tabs.conversas,
               tabBarIcon: renderTabIcon(require('@/assets/icons/chat.png')),
-            }}
-          />
-          <Tabs.Screen
-            name="camera"
-            options={{
-              title: "Camera",
-              tabBarIcon: renderTabIcon(require('@/assets/icons/camera.png')),
             }}
           />
         </Tabs>
