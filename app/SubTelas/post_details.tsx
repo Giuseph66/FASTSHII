@@ -13,15 +13,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   StatusBar,
+  Modal,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { firestore } from '@/firebaseConfig';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteField } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ImageViewer from 'react-native-image-zoom-viewer';
+import BlockUserModal from '@/components/BlockUserModal';
+import CommentItem from '@/components/CommentItem';
+
 const windowWidth = Dimensions.get('window').width;
 const windowHeight = Dimensions.get('window').height;
 
@@ -39,11 +45,14 @@ interface Comment {
   userId: string;
   text: string;
   timestamp: number;
+  username?: string;
 }
 
 interface User {
+  uid: string;
   id: string;
   user: string;
+  username: string;
   email: string;
 }
 
@@ -59,22 +68,30 @@ const PostDetailsScreen = () => {
   const [isLiked, setIsLiked] = useState(false);
   const [likesCount, setLikesCount] = useState(0);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
   const insets = useSafeAreaInsets();
+  const [moreOptionsVisible, setMoreOptionsVisible] = useState(false);
+  const [blockModalVisible, setBlockModalVisible] = useState(false);
+  const [isMe, setIsMe] = useState(false);
+  const [commentUsernames, setCommentUsernames] = useState<{ [userId: string]: string }>({});
+
   useEffect(() => {
     const loadData = async () => {
+      console.log( "postId", postId);
       try {
         // Load current user
         const storedUser = await AsyncStorage.getItem('user');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
+        const userData = JSON.parse(storedUser || '{}');
+        console.log( "userData", userData);
+        if (userData) {
+          setUser(userData);
         }
-
         // Load post data
         const postDoc = await getDoc(doc(firestore, 'posts', postId as string));
         if (postDoc.exists()) {
           const postData = { id: postDoc.id, ...postDoc.data() } as Post;
           setPost(postData);
-          setIsLiked(postData.likes[user?.id || ''] || false);
+          setIsLiked(postData.likes[userData?.uid || ''] || false);
           setLikesCount(Object.keys(postData.likes).filter(key => postData.likes[key]).length);
           
           // Sort comments by timestamp
@@ -87,9 +104,15 @@ const PostDetailsScreen = () => {
             const userDoc = await getDoc(doc(firestore, 'usuarios', postData.userId));
             if (userDoc.exists()) {
               setPostUser({ id: userDoc.id, ...userDoc.data() } as User);
+              
             }
           } catch (error) {
             console.error('Error loading user data:', error);
+          }
+          if (userData?.uid === postData?.userId) {
+            setIsMe(true);
+          }else{
+            setIsMe(false);
           }
         }
       } catch (error) {
@@ -102,32 +125,82 @@ const PostDetailsScreen = () => {
     loadData();
   }, [postId]);
 
+  useEffect(() => {
+    const fetchCommentUsernames = async () => {
+      if (!comments.length) return;
+      const missingUserIds = comments
+        .map(c => c.userId)
+        .filter(uid => !commentUsernames[uid]);
+      if (missingUserIds.length === 0) return;
+
+      const newUsernames: { [userId: string]: string } = { ...commentUsernames };
+      for (const uid of missingUserIds) {
+        try {
+          const userDoc = await getDoc(doc(firestore, 'usuarios', uid));
+          if (userDoc.exists()) {
+            newUsernames[uid] = userDoc.data().user || uid;
+          } else {
+            newUsernames[uid] = uid;
+          }
+        } catch {
+          newUsernames[uid] = uid;
+        }
+      }
+      setCommentUsernames(newUsernames);
+    };
+    fetchCommentUsernames();
+  }, [comments]);
+
   const handleLike = async () => {
-    if (!user || !post) return;
+    if (!user) {
+      Alert.alert('Erro', 'Você precisa estar autenticado para curtir um post.');
+      return;
+    }
 
     try {
-      const postRef = doc(firestore, 'posts', post.id);
-      const newLikeState = !isLiked;
+      const postRef = doc(firestore, 'posts', post?.id || '');
+      const isLiked = post?.likes[user.uid];
 
-      await updateDoc(postRef, {
-        [`likes.${user.id}`]: newLikeState
-      });
+      if (isLiked) {
+        await updateDoc(postRef, {
+          [`likes.${user.uid}`]: false,
+        });
+      } else {
+        await updateDoc(postRef, {
+          [`likes.${user.uid}`]: true,
+        });
+      }
 
-      setIsLiked(newLikeState);
-      setLikesCount(prev => newLikeState ? prev + 1 : prev - 1);
+      if (post) {
+        setPost({
+          ...post,
+          likes: {
+            ...post.likes,
+            [user.uid]: !isLiked,
+          },
+        });
+      }
+      
+      setIsLiked(!isLiked);
+      setLikesCount(prev => isLiked ? prev - 1 : prev + 1);
     } catch (error) {
-      console.error('Error updating like:', error);
+      console.error('Erro ao curtir o post:', error);
+      Alert.alert('Erro', 'Não foi possível curtir o post.');
     }
   };
 
   const handleComment = async () => {
-    if (!user || !post || !commentText.trim()) return;
+    if (!user || !user.uid || !post || !commentText.trim()) {
+      Alert.alert('Erro', 'Usuário não autenticado ou comentário vazio.');
+      return;
+    }
 
     try {
       const postRef = doc(firestore, 'posts', post.id);
-      const commentId = `${user.id}_${Date.now()}`;
+      const commentId = `${user.uid}_${Date.now()}`;
       const newComment = {
-        userId: user.id,
+        userId: user.uid,
+        username: user.username,
         text: commentText.trim(),
         timestamp: Date.now()
       };
@@ -139,7 +212,8 @@ const PostDetailsScreen = () => {
       setComments(prev => [newComment, ...prev]);
       setCommentText('');
     } catch (error) {
-      console.error('Error adding comment:', error);
+      console.error('Erro ao adicionar comentário:', error);
+      Alert.alert('Erro', 'Não foi possível adicionar o comentário.');
     }
   };
 
@@ -155,6 +229,39 @@ const PostDetailsScreen = () => {
     if (hours > 0) return `${hours}h`;
     if (minutes > 0) return `${minutes}m`;
     return `${seconds}s`;
+  };
+
+  const handleMorePress = (username: string) => {
+    setMoreOptionsVisible(true);
+  };
+
+  const handleBlockUser = () => {
+    setMoreOptionsVisible(false);
+    setBlockModalVisible(true);
+  };
+
+  const handleConfirmBlock = (username: string) => {
+    console.log( "handleConfirmBlock", username);
+    Alert.alert(
+      'Usuário Bloqueado',
+      `Você bloqueou o usuário ${username}.`,
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            router.back();
+          }
+        }
+      ]
+    );
+  };
+
+  // Função auxiliar para obter a chave do comentário
+  const getCommentKey = (comment: Comment) => {
+    if (!post) return undefined;
+    return Object.keys(post.comments).find(
+      key => post.comments[key].timestamp === comment.timestamp && post.comments[key].userId === comment.userId
+    );
   };
 
   if (loading) {
@@ -182,11 +289,14 @@ const PostDetailsScreen = () => {
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.moreButton, { backgroundColor: 'rgba(0,0,0,0.3)' }]}
-          >
-            <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
-          </TouchableOpacity>
+          {!isMe && (
+            <TouchableOpacity
+              style={[styles.moreButton, { backgroundColor: 'rgba(0,0,0,0.3)' }]}
+              onPress={() => handleMorePress(postUser?.user || '')}
+            >
+              <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+            </TouchableOpacity>
+          )}
         </View>
 
         <ScrollView style={styles.scrollView}>
@@ -220,11 +330,31 @@ const PostDetailsScreen = () => {
           {/* Post Content */}
           <View style={styles.postContent}>
             {post?.imageBase64 && (
-              <Image
-                source={{ uri: `data:image/jpeg;base64,${post.imageBase64}` }}
-                style={styles.postImage}
-                resizeMode="cover"
-              />
+              <>
+                <TouchableOpacity onPress={() => setIsImageViewerVisible(true)}>
+                  <Image
+                    source={{ uri: `data:image/jpeg;base64,${post.imageBase64}` }}
+                    style={styles.postImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+                <Modal visible={isImageViewerVisible} transparent={true}>
+                  <ImageViewer
+                    imageUrls={[{ url: `data:image/jpeg;base64,${post.imageBase64}` }]}
+                    enableSwipeDown={true}
+                    onSwipeDown={() => setIsImageViewerVisible(false)}
+                    onClick={() => setIsImageViewerVisible(false)}
+                    renderHeader={() => (
+                      <TouchableOpacity
+                        style={styles.closeButton}
+                        onPress={() => setIsImageViewerVisible(false)}
+                      >
+                        <Ionicons name="close" size={30} color="#fff" />
+                      </TouchableOpacity>
+                    )}
+                  />
+                </Modal>
+              </>
             )}
             <Text style={[styles.postText, { color: themeColors.googleButton }]}>
               {post?.text}
@@ -252,9 +382,6 @@ const PostDetailsScreen = () => {
                 {comments.length}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="share-outline" size={24} color={themeColors.googleButton} />
-            </TouchableOpacity>
           </View>
 
           {/* Comments Section */}
@@ -263,19 +390,42 @@ const PostDetailsScreen = () => {
               Comentários
             </Text>
             {comments.map((comment, index) => (
-              <View key={index} style={styles.commentItem}>
-                <View style={styles.commentHeader}>
-                  <Text style={[styles.commentUsername, { color: themeColors.googleButton }]}>
-                    {comment.userId === user?.id ? 'Você' : 'Usuário'}
-                  </Text>
-                  <Text style={[styles.commentTime, { color: themeColors.googleButton }]}>
-                    {formatTime(comment.timestamp)}
-                  </Text>
-                </View>
-                <Text style={[styles.commentText, { color: themeColors.googleButton }]}>
-                  {comment.text}
-                </Text>
-              </View>
+              <CommentItem
+                key={index}
+                comment={comment}
+                username={
+                  comment.userId === user?.uid
+                    ? 'Você'
+                    : commentUsernames[comment.userId] || comment.username || 'Usuário'
+                }
+                isOwnComment={comment.userId === user?.uid}
+                onMention={(c) => setCommentText(prev => prev + `@${commentUsernames[comment.userId] || comment.username || 'Usuário'} `)}
+                onEdit={async (newText) => {
+                  const commentKey = getCommentKey(comment);
+                  if (post && commentKey) {
+                    const postRef = doc(firestore, 'posts', post.id);
+                    await updateDoc(postRef, {
+                      [`comments.${commentKey}.text`]: newText
+                    });
+                    setComments(prev => prev.map(c =>
+                      c.timestamp === comment.timestamp && c.userId === comment.userId
+                        ? { ...c, text: newText }
+                        : c
+                    ));
+                  }
+                }}
+                onDelete={async () => {
+                  const commentKey = getCommentKey(comment);
+                  if (post && commentKey) {
+                    const postRef = doc(firestore, 'posts', post.id);
+                    await updateDoc(postRef, {
+                      [`comments.${commentKey}`]: deleteField()
+                    });
+                    setComments(prev => prev.filter(c => c.timestamp !== comment.timestamp || c.userId !== comment.userId));
+                  }
+                }}
+                formatTime={formatTime}
+              />
             ))}
           </View>
         </ScrollView>
@@ -307,6 +457,40 @@ const PostDetailsScreen = () => {
             />
           </TouchableOpacity>
         </View>
+
+        {/* Modal de mais opções */}
+        <Modal visible={moreOptionsVisible} transparent={true} animationType="fade">
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setMoreOptionsVisible(false)}
+          >
+            <View style={[styles.moreOptionsContainer, { backgroundColor: themeColors.background }]}>
+              <TouchableOpacity
+                style={[styles.moreOptionButton, { backgroundColor: 'rgba(255,0,0,0.2)' }]}
+                onPress={handleBlockUser}
+              >
+                <Ionicons 
+                  name="ban-outline" 
+                  size={20} 
+                  color="#ff4444" 
+                  style={styles.moreOptionIcon}
+                />
+                <Text style={[styles.moreOptionText, { color: '#ff4444' }]}>
+                  Bloquear Usuário
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Modal de bloqueio */}
+        <BlockUserModal
+          visible={blockModalVisible}
+          onClose={() => setBlockModalVisible(false)}
+          selectedUser={postUser?.user || null}
+          onBlockUser={handleConfirmBlock}
+        />
       </LinearGradient>
     </KeyboardAvoidingView>
   );
@@ -471,5 +655,41 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 1000,
+    padding: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moreOptionsContainer: {
+    width: Math.min(windowWidth * 0.8, 300),
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+  },
+  moreOptionButton: {
+    width: '100%',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  moreOptionIcon: {
+    marginRight: 8,
+  },
+  moreOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 }); 

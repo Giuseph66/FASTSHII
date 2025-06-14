@@ -11,16 +11,20 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  StatusBar
+  StatusBar,
+  Alert
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { firestore } from '@/firebaseConfig';
-import { collection, query, where, getDocs, orderBy, getDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, getDoc, doc, addDoc } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import BlockUserModal from '@/components/BlockUserModal';
+import CustomAlert from '@/components/CustomAlert';
+import type { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 const windowWidth = Dimensions.get('window').width;
 const windowHeight = Dimensions.get('window').height;
@@ -42,6 +46,7 @@ interface User {
   bio?: string;
   followers?: string[];
   following?: string[];
+  username?: string;
 }
 
 const UserProfileScreen = () => {
@@ -55,6 +60,20 @@ const UserProfileScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [isMe, setIsMe] = useState(false);
   const insets = useSafeAreaInsets();
+  const [blockModalVisible, setBlockModalVisible] = useState(false);
+  const [myUser, setMyUser] = useState<User | null>(null);
+  const [loading_message, setLoading_message] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons: {
+      text: string;
+      onPress?: () => void;
+      style?: 'default' | 'cancel' | 'destructive';
+    }[];
+  }>({ visible: false, title: '', message: '', buttons: [] });
+
   const fetchUserProfile = async () => {
     try {
       console.log(userid);
@@ -67,8 +86,11 @@ const UserProfileScreen = () => {
       const data = await AsyncStorage.getItem('user');
       if (data) {
         const user = JSON.parse(data);
+        setMyUser(user);
         if (user.uid === userid) {
           setIsMe(true);
+        }else{
+          setIsMe(false);
         }
       }
     } catch (error) {
@@ -145,13 +167,103 @@ const UserProfileScreen = () => {
     setIsFollowing(prev => !prev);
   };
 
-  const handleSendMessage = () => {
-    router.push({
-      pathname: '/SubTelas/chat',
-      params: { 
-        nomeConversa: profile?.user,
+  const handleBlockUser = () => {
+    setBlockModalVisible(true);
+  };
+
+  const handleConfirmBlock = (username: string) => {
+    console.log( "handleConfirmBlock", username);
+    setCustomAlert({
+      visible: true,
+      title: 'Usuário Bloqueado',
+      message: `Você bloqueou o usuário ${username}.`,
+      buttons: [
+        {
+          text: 'OK',
+          style: 'default',
+          onPress: () => {
+            router.back();
+          }
+        }
+      ]  
+    });
+  };
+
+  const handleSendMessage = async () => {
+    setLoading_message(true)
+    console.log( "profile?.user", profile?.user);
+    console.log( "myUser?.username", myUser?.username);
+    if(profile?.user === myUser?.username){
+      profile.user = "Eu";}
+    if (!profile?.user || !myUser?.username) {
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível identificar os usuários para iniciar a conversa.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      return;
+    }
+    const userA = profile.user;
+    const userB = myUser.username;
+    const chatsRef = collection(firestore, 'chats');
+    // Buscar todos os chats onde o usuário logado participa
+    const q = query(
+      chatsRef,
+      where('participants', 'array-contains', userB)
+    );
+    const querySnapshot = await getDocs(q);
+    // Procurar se já existe um chat entre os dois usuários
+    let foundChat: any = null;
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (
+        Array.isArray(data.participants) &&
+        data.participants.includes(userA) &&
+        data.participants.includes(userB) &&
+        data.participants.length === 2
+      ) {
+        foundChat = docSnap;
       }
     });
+    const otherUser = userA === userB ? userA : (userA === myUser.username ? userB : userA);
+    if (foundChat !== null) {
+      // Usar customNames do chat existente
+      const customNames = foundChat.data().customNames || {};
+      const displayName = customNames[otherUser] || otherUser;
+      router.push({
+        pathname: '/SubTelas/chat',
+        params: {
+          chatId: foundChat.id,
+          nomeConversa: displayName,
+        }
+      });
+    } else {
+      // Criar novo chat
+    setLoading_message(false)
+
+      const chatRef = await addDoc(chatsRef, {
+        createdAt: Date.now(),
+        participants: [userA, userB],
+        customNames: {
+          [userA]: userA,
+          [userB]: userB
+        },
+        lastMessage: '',
+        lastMessageTime: Date.now(),
+      });
+      const displayName = customNames[otherUser] || otherUser;
+      router.push({
+        pathname: '/SubTelas/chat',
+        params: {
+          chatId: chatRef.id,
+          nomeConversa: displayName,
+        }
+      });
+    }
+    setLoading_message(false)
   };
 
   const renderPost = ({ item }: { item: Post }) => {
@@ -210,6 +322,14 @@ const UserProfileScreen = () => {
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
+          {!isMe && (
+            <TouchableOpacity 
+              onPress={() => handleBlockUser()}
+              style={[styles.moreButton, { backgroundColor: 'rgba(0,0,0,0.3)' }]}
+            >
+              <Ionicons name="ban" size={24} color="red" />
+            </TouchableOpacity>
+          )}
         </View>
 
         <ScrollView 
@@ -288,15 +408,25 @@ const UserProfileScreen = () => {
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
                 onPress={handleSendMessage}
+                disabled={loading_message}
               >
-                <Ionicons 
+                {loading_message ? (
+                  <Ionicons 
                   name="chatbubble-outline" 
                   size={20} 
                   color="#fff" 
                   style={styles.actionButtonIcon}
                 />
+                ) : (
+                  <Ionicons 
+                  name="chatbubble-sharp" 
+                  size={20} 
+                  color="#fff" 
+                  style={styles.actionButtonIcon}
+                />
+                )}
                 <Text style={[styles.actionButtonText, { color: '#fff' }]}>
-                  Mensagem
+                  {loading_message ? 'Abrindo conversa...' : 'Mensagem'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -323,6 +453,19 @@ const UserProfileScreen = () => {
           </View>
         </ScrollView>
       </LinearGradient>
+      <BlockUserModal
+        visible={blockModalVisible}
+        onClose={() => setBlockModalVisible(false)}
+        selectedUser={profile?.user || null}
+        onBlockUser={handleConfirmBlock}
+      />
+      <CustomAlert
+        visible={customAlert.visible}
+        title={customAlert.title}
+        message={customAlert.message}
+        buttons={customAlert.buttons}
+        onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };

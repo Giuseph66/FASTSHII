@@ -26,7 +26,7 @@ const currentLanguage = 'pt'; // Altere para 'en' para inglês
 
 // Função para gerar nome de usuário aleatório
 function generateRandomUsername() {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*_-';
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&_-';
   let diagrama = '';
   const tamanho = 8;
 

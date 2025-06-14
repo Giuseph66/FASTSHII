@@ -19,17 +19,42 @@ import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getDoc, updateDoc, arrayRemove } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { firestore } from '@/firebaseConfig';
+import CustomAlert from '@/components/CustomAlert';
 
 const { width, height } = Dimensions.get('window');
+
+// Definir tipos para os botões do CustomAlert
+interface CustomAlertButton {
+  text: string;
+  onPress?: () => void;
+  style?: 'default' | 'cancel' | 'destructive';
+}
+
+interface BlockedUser {
+  id: string;
+  username: string;
+}
+
+interface User {
+  username: string;
+  email: string;
+  uid: string;
+  blockedUsers: BlockedUser[];
+}
+
 const Profile15Screen = () => {
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-  const [user, setUser] = useState({ username: '', email: '', uid: '' });
+  const [user, setUser] = useState<User>({ username: '', email: '', uid: '', blockedUsers: [] });
   const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [blockedUsersModalVisible, setBlockedUsersModalVisible] = useState(false);
   const [newUsername, setNewUsername] = useState('');
+  const [customAlert, setCustomAlert] = useState<{ visible: boolean; title: string; message: string; buttons: CustomAlertButton[] }>({ visible: false, title: '', message: '', buttons: [] });
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -56,8 +81,128 @@ const Profile15Screen = () => {
     setPrivacyModalVisible(true);
   };
 
-  const handleBlockedUsers = () => {
-    setBlockedUsersModalVisible(true);
+  const handleBlockedUsers = async () => {
+    try {
+      const userStr = await AsyncStorage.getItem('user');
+      if (!userStr) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Usuário não autenticado',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
+        return;
+      }
+
+      const currentUser = JSON.parse(userStr);
+      const userDoc = await getDoc(doc(firestore, 'usuarios', currentUser.uid));
+      
+      if (!userDoc.exists()) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Usuário não encontrado',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
+        return;
+      }
+
+      const userData = userDoc.data();
+      const blockedUsersIds: string[] = userData.blockedUsers || [];
+
+      // Buscar informações dos usuários bloqueados
+      const blockedUsersInfo: BlockedUser[] = [];
+      for (const blockedId of blockedUsersIds) {
+        const blockedUserDoc = await getDoc(doc(firestore, 'usuarios', blockedId));
+        if (blockedUserDoc.exists()) {
+          const blockedUserData = blockedUserDoc.data();
+          blockedUsersInfo.push({
+            id: blockedId,
+            username: blockedUserData.user || 'Usuário Desconhecido'
+          });
+        }
+      }
+
+      // Atualizar o estado local com os usuários bloqueados
+      setUser(prev => ({ ...prev, blockedUsers: blockedUsersInfo }));
+      
+      // Atualizar o AsyncStorage com os dados mais recentes
+      const updatedUserData = {
+        ...currentUser,
+        blockedUsers: blockedUsersIds
+      };
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
+
+      // Mostrar o modal
+      setBlockedUsersModalVisible(true);
+
+    } catch (error: any) {
+      console.error('Erro ao carregar usuários bloqueados:', error);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao carregar usuários bloqueados: ' + error.message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+    }
+  };
+
+  const handleUnblockUser = (userId: string, username: string) => {
+    setCustomAlert({
+      visible: true,
+      title: `Desbloqueando usuário ${username}`,
+      message: `Tem certeza que deseja desbloquear o usuário?`,
+      buttons: [
+        { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
+        { text: 'OK', style: 'default', onPress: async () => {
+          try {
+            const userStr = await AsyncStorage.getItem('user');
+            if (!userStr) return;
+            const currentUser = JSON.parse(userStr);
+            // Atualizar no Firestore
+            const userRef = doc(firestore, 'usuarios', currentUser.uid);
+            await updateDoc(userRef, {
+              blockedUsers: arrayRemove(userId)
+            });
+            // Atualizar no AsyncStorage
+            const updatedBlockedUsers = (currentUser.blockedUsers || []).filter((id: string) => id !== userId);
+            const updatedUserData = {
+              ...currentUser,
+              blockedUsers: updatedBlockedUsers
+            };
+            await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
+            // Atualizar o estado local
+            setUser(prev => ({
+              ...prev,
+              blockedUsers: prev.blockedUsers.filter((user: BlockedUser) => user.id !== userId)
+            }));
+            setCustomAlert({
+              visible: true,
+              title: 'Sucesso',
+              message: `Usuário ${username} foi desbloqueado com sucesso.`,
+              buttons: [
+                { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+              ]
+            });
+          } catch (error: any) {
+            setCustomAlert({
+              visible: true,
+              title: 'Erro',
+              message: 'Erro ao desbloquear usuário: ' + error.message,
+              buttons: [
+                { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+              ]
+            });
+          }
+        } }
+      ]
+    });
   };
 
   const handleSaveProfile = async () => {
@@ -147,14 +292,15 @@ const Profile15Screen = () => {
           <TouchableOpacity
             style={[styles.logoutButton, { backgroundColor: themeColors.background }]}
             onPress={() => {
-              Alert.alert(
-                'Sair da conta',
-                'Tem certeza que deseja sair?',
-                [
-                  { text: 'Cancelar', style: 'cancel' },
+              setCustomAlert({
+                visible: true,
+                title: 'Sair da conta',
+                message: 'Tem certeza que deseja sair?',
+                buttons: [
+                  { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert({ ...customAlert, visible: false }) },
                   { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
                 ]
-              );
+              });
             }}
           >
             <Ionicons name="log-out-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
@@ -226,7 +372,36 @@ const Profile15Screen = () => {
               activeOpacity={1}
             >
               <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>Usuários Bloqueados</Text>
-              <Text style={[styles.modalText, { color: themeColors.googleButton }]}>Nenhum usuário bloqueado.</Text>
+              
+              <ScrollView style={styles.blockedUsersScrollView}>
+                {Array.isArray(user.blockedUsers) && user.blockedUsers.length > 0 ? (
+                  user.blockedUsers.map((blockedUser: BlockedUser) => (
+                    <View key={blockedUser.id} style={[styles.blockedUserItem, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+                      <View style={styles.blockedUserInfo}>
+                        <Ionicons name="person-circle-outline" size={24} color={themeColors.tint} style={styles.blockedUserIcon} />
+                        <Text style={[styles.blockedUserName, { color: themeColors.textSearch }]}>
+                          {blockedUser.username}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.unblockButton, { backgroundColor: themeColors.tint }]}
+                        onPress={() => handleUnblockUser(blockedUser.id, blockedUser.username)}
+                      >
+                        <Ionicons name="lock-open-outline" size={20} color="#fff" />
+                        <Text style={styles.unblockButtonText}>Desbloquear</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.emptyBlockedUsers}>
+                    <Ionicons name="people-outline" size={48} color={themeColors.icon} />
+                    <Text style={[styles.emptyBlockedUsersText, { color: themeColors.googleButton }]}>
+                      Nenhum usuário bloqueado
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: themeColors.tint }]}
                 onPress={() => setBlockedUsersModalVisible(false)}
@@ -236,6 +411,14 @@ const Profile15Screen = () => {
             </TouchableOpacity>
           </TouchableOpacity>
         </Modal>
+
+        <CustomAlert
+          visible={customAlert.visible}
+          title={customAlert.title}
+          message={customAlert.message}
+          buttons={customAlert.buttons}
+          onRequestClose={() => setCustomAlert({ ...customAlert, visible: false })}
+        />
       </LinearGradient>
     </KeyboardAvoidingView>
   );
@@ -398,5 +581,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 20,
+  },
+  blockedUsersScrollView: {
+    width: '100%',
+    maxHeight: 300,
+    marginBottom: 20,
+  },
+  blockedUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  blockedUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  blockedUserIcon: {
+    marginRight: 12,
+  },
+  blockedUserName: {
+    fontSize: 16,
+    flex: 1,
+  },
+  unblockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  unblockButtonText: {
+    color: '#fff',
+    marginLeft: 4,
+    fontSize: 14,
+  },
+  emptyBlockedUsers: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyBlockedUsersText: {
+    marginTop: 12,
+    fontSize: 16,
+    textAlign: 'center',
   },
 });

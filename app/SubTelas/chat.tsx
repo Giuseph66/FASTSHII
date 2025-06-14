@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Dimensions } from 'react-native';
+import ImageViewer from 'react-native-image-zoom-viewer';
 
 const { height } = Dimensions.get('window');
 
@@ -37,7 +38,7 @@ interface Message {
   image?: string;
   timestamp: number;
   sender: string;
-  reactions: Record<string, number>;
+  reactions: Record<string, string[]>;
 }
 
 const ChatScreen = () => {
@@ -60,6 +61,15 @@ const ChatScreen = () => {
   const [teclado, setTeclado] = useState<number>(0);
   const [envia, setenviar] = useState<boolean>(true);
   const insets = useSafeAreaInsets();
+  const [editNameModalVisible, setEditNameModalVisible] = useState(false);
+  const [newCustomName, setNewCustomName] = useState('');
+  const [savingCustomName, setSavingCustomName] = useState(false);
+  const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  const previewScrollRef = useRef<ScrollView>(null);
+  const [reactionModalVisible, setReactionModalVisible] = useState(false);
+  const [reactionTargetMessageId, setReactionTargetMessageId] = useState<string>('');
+  const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '👎'];
+
   useEffect(() => {
     const fetchUserData = async () => {
       try {
@@ -144,6 +154,15 @@ const ChatScreen = () => {
       hideSub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (previewScrollRef.current) {
+      previewScrollRef.current.scrollTo({
+        x: Math.max(0, (imageViewerIndex - 1) * 44), // 36px img + 8px margin
+        animated: true,
+      });
+    }
+  }, [imageViewerIndex]);
 
   const handleSend = async () => {
     console.log(envia);
@@ -251,6 +270,65 @@ const ChatScreen = () => {
     }
   };
 
+  const handleChangeCustomName = async () => {
+    if (!chatId || !userName || !newCustomName.trim() || participants.length < 2) return;
+    const otherParticipant = participants.find((p) => p !== userName);
+    if (!otherParticipant) return;
+    setSavingCustomName(true);
+    try {
+      const chatRef = doc(firestore, 'chats', String(chatId));
+      await updateDoc(chatRef, {
+        [`customNames.${otherParticipant}`]: newCustomName.trim(),
+      });
+      setEditNameModalVisible(false);
+      setNewCustomName('');
+    } catch (error) {
+      console.error('Erro ao atualizar nome da conversa:', error);
+    } finally {
+      setSavingCustomName(false);
+    }
+  };
+
+  // Imagens para o ImageViewer (ordem correta)
+  const imageMessages = messages.filter(m => m.image).slice().reverse();
+  const imageUrls = imageMessages.map(m => ({ url: m.image! }));
+
+  const handleImagePress = (clickedImage: string) => {
+    const index = imageMessages.findIndex(m => m.image === clickedImage);
+    setImageViewerIndex(index);
+    setImageViewerVisible(true);
+  };
+
+  // Função para adicionar/remover reação
+  const handleSelectReaction = async (messageId: string, reaction: string) => {
+    if (!chatId || !userName) return;
+    const messageRef = doc(firestore, 'chats', String(chatId), 'messages', messageId);
+    // Buscar mensagem atual
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return;
+    const reactions = msg.reactions || {};
+    const users = Array.isArray(reactions[reaction]) ? reactions[reaction] : [];
+    let newReactions = { ...reactions };
+    if (users.includes(userName)) {
+      // Remover reação
+      newReactions[reaction] = users.filter(u => u !== userName);
+    } else {
+      // Adicionar reação (garantir que só pode 1 por usuário por emoji)
+      newReactions[reaction] = [...users, userName];
+    }
+    await updateDoc(messageRef, {
+      [`reactions.${reaction}`]: newReactions[reaction],
+    });
+    setReactionModalVisible(false);
+    setReactionTargetMessageId('');
+  };
+
+  // Função para abrir modal de reação
+  const openReactionModal = (messageId: string) => {
+    setReactionTargetMessageId(messageId);
+    setReactionModalVisible(true);
+  };
+
   const renderItem = ({ item }: { item: Message }) => {
     const isUser = item.sender === userName;
     const reactionCounts = item.reactions || {};
@@ -262,12 +340,14 @@ const ChatScreen = () => {
           isUser ? styles.userBubble : styles.friendBubble,
         ]}
       >
+      <TouchableOpacity
+      onLongPress={() => openReactionModal(item.id)}
+      >
+        
         {item.image && (
           <TouchableOpacity
-            onPress={() => {
-              setImageToView(item.image || null);
-              setImageViewerVisible(true);
-            }}
+            onPress={() => handleImagePress(item.image!)}
+            onLongPress={() => openReactionModal(item.id)}
           >
             <Image
               source={{ uri: item.image }}
@@ -280,17 +360,24 @@ const ChatScreen = () => {
           {new Date(item.timestamp).toLocaleTimeString()}
         </Text>
         <View style={styles.reactionsContainer}>
-          {['👍', '❤️', '😂', '😮', '😢', '👎'].map((reaction) => (
-            <TouchableOpacity
-              key={reaction}
-              onPress={() => handleReaction(item.id, reaction)}
-            >
-              <Text style={[styles.reaction, { color: themeColors.textSearch }]}>
-                {reaction} {reactionCounts[reaction] || 0}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {Object.entries(reactionCounts)
+            .filter(([_, users]) => Array.isArray(users) && users.length > 0)
+            .map(([reaction, users]) => {
+              const reacted = userName ? users.includes(userName) : false;
+              return (
+                <TouchableOpacity
+                  key={reaction}
+                  onPress={() => reacted ? handleSelectReaction(item.id, reaction) : null}
+                  style={{ opacity: reacted ? 1 : 0.5 }}
+                >
+                  <Text style={[styles.reaction, { color: '#fff' }]}>
+                    {reaction} {users.length > 0 ? users.length : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
         </View>
+      </TouchableOpacity>
       </View>
     );
   };
@@ -306,11 +393,14 @@ const ChatScreen = () => {
         >
           {/* Header */}
           <View style={[styles.chatHeader, { backgroundColor: themeColors.tint }]}>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/conversas')} style={styles.backButton}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <Text style={[styles.chatTitle, { color: '#FFFFFF' }]}>{headerName}</Text>
-            <TouchableOpacity style={styles.moreButton}>
+            <TouchableOpacity style={styles.moreButton} onPress={() => {
+              setEditNameModalVisible(true);
+              setNewCustomName(headerName);
+            }}>
               <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -365,20 +455,116 @@ const ChatScreen = () => {
 
           {/* Image Viewer Modal */}
           <Modal visible={imageViewerVisible} transparent={true} animationType="fade">
-            <TouchableOpacity
-              style={styles.imageViewerContainer}
-              activeOpacity={1}
-              onPress={() => setImageViewerVisible(false)}
-            >
-              {imageToView && (
-                <Image source={{ uri: imageToView }} style={styles.fullscreenImage} />
-              )}
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}>
+              <View style={{ width: '100%', height: '80%', bottom:'0%', borderRadius: 16, overflow: 'hidden' }}>
+                <ImageViewer
+                  imageUrls={imageUrls}
+                  index={imageViewerIndex}
+                  backgroundColor="transparent"
+                  enableSwipeDown
+                  onSwipeDown={() => setImageViewerVisible(false)}
+                  renderIndicator={(currentIndex, allSize) => (
+                    <View style={{ alignItems: 'center', marginBottom: 10 }}>
+                      <Text style={{ color: '#fff' }}>{currentIndex} / {allSize}</Text>
+                    </View>
+                  )}
+                  onClick={() => setImageViewerVisible(false)}
+                  saveToLocalByLongPress={false}
+                  style={{ borderRadius: 16 }}
+                />
+              </View>
+              {/* Barra de preview e botão de fechar permanecem iguais */}
+              <ScrollView
+                ref={previewScrollRef}
+                horizontal style={{ position: 'absolute', bottom: 30, left: 0, right: 0, paddingHorizontal: 10 }} showsHorizontalScrollIndicator={false}>
+                {imageMessages.map((msg, idx) => (
+                  <TouchableOpacity
+                    key={msg.id}
+                    onPress={() => {
+                      setImageViewerIndex(idx);
+                    }}
+                    style={{ marginHorizontal: 4, borderWidth: idx === imageViewerIndex ? 2 : 0, borderColor: '#fff', borderRadius: 6 }}
+                  >
+                    <Image source={{ uri: msg.image! }} style={{ width: 36, height: 36, borderRadius: 6, opacity: idx === imageViewerIndex ? 1 : 0.7 }} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
               <TouchableOpacity
                 style={styles.closeImageViewerButton}
                 onPress={() => setImageViewerVisible(false)}
               >
                 <Ionicons name="close" size={30} color="#fff" />
               </TouchableOpacity>
+            </View>
+          </Modal>
+
+          {/* Modal para editar nome da conversa */}
+          <Modal visible={editNameModalVisible} transparent animationType="fade">
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+              activeOpacity={1}
+              onPress={() => setEditNameModalVisible(false)}
+            >
+              <View style={{ width: '85%', backgroundColor: themeColors.background, borderRadius: 16, padding: 24, alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.googleButton, marginBottom: 16 }}>Editar nome da conversa</Text>
+                <TextInput
+                  value={newCustomName}
+                  onChangeText={setNewCustomName}
+                  style={{ width: '100%', borderWidth: 1, borderColor: themeColors.tint, borderRadius: 10, padding: 12, color: themeColors.textSearch, marginBottom: 20, backgroundColor: themeColors.backgroundfraco }}
+                  placeholder="Novo nome para esta conversa"
+                  placeholderTextColor={themeColors.icon}
+                  autoFocus
+                />
+                <View style={{ flexDirection: 'row', width: '100%', justifyContent: 'space-between' }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: themeColors.tint, padding: 12, borderRadius: 10, alignItems: 'center', marginRight: 8 }}
+                    onPress={handleChangeCustomName}
+                    disabled={savingCustomName || !newCustomName.trim()}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{savingCustomName ? 'Salvando...' : 'Salvar'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: themeColors.backgroundfraco, padding: 12, borderRadius: 10, alignItems: 'center', marginLeft: 8 }}
+                    onPress={() => setEditNameModalVisible(false)}
+                    disabled={savingCustomName}
+                  >
+                    <Text style={{ color: themeColors.googleButton, fontWeight: 'bold' }}>Cancelar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+
+          {/* Modal de reações */}
+          <Modal visible={reactionModalVisible} transparent animationType="fade">
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}
+              activeOpacity={1}
+              onPress={() => setReactionModalVisible(false)}
+            >
+              <View style={{ flexDirection: 'row', backgroundColor: themeColors.background, borderRadius: 16, padding: 10, alignItems: 'center', elevation: 10, borderColor: themeColors.backgroundfundoemoji, borderWidth: 1}}>
+                {availableReactions.map((reaction) => {
+                  // Busca a mensagem alvo
+                  const msg = messages.find(m => m.id === reactionTargetMessageId);
+                  const users = msg && Array.isArray(msg.reactions?.[reaction]) ? msg.reactions[reaction] : [];
+                  const isActive = users.length > 0;
+                  return (
+                    <TouchableOpacity
+                      key={reaction}
+                      onPress={() => reactionTargetMessageId && handleSelectReaction(reactionTargetMessageId, reaction)}
+                      style={{
+                        margin: 10,
+                        backgroundColor: isActive ? themeColors.backgroundfundoemoji : 'transparent',
+                        padding: 5,
+                        borderRadius: 100,
+                        transform: [{ scale: isActive ? 1.2 : 1 }],
+                      }}
+                    >
+                      <Text style={{ fontSize: 32 }}>{reaction}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </TouchableOpacity>
           </Modal>
         </LinearGradient>

@@ -29,6 +29,7 @@ interface User {
   email: string;
   password: string;
   user: string;
+  blockedUsers: string[];
 }
 
 export default function LoginScreen() {
@@ -76,7 +77,8 @@ export default function LoginScreen() {
             id: doc.id, 
             email: userData.email as string,
             password: userData.password as string,
-            user: userData.user as string
+            user: userData.user as string,
+            blockedUsers: userData.blockedUsers as string[]
           };
         }
       });

@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   useColorScheme,
   Dimensions,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +33,8 @@ import { getCachedImage, cacheImage } from '@/utils/imageCache';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Background } from '@react-navigation/elements';
 import { ThemeContext } from '@react-navigation/native';
+import BlockUserModal from '@/components/BlockUserModal';
+import CustomAlert from '@/components/CustomAlert';
 
 interface Comment {
   userId: string;
@@ -55,6 +58,7 @@ interface User {
   uid: string;
   user: string;
   email: string;
+  username: string;
 }
 
 interface CachedImage {
@@ -147,6 +151,17 @@ const FastShiiiScreen = () => {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [blockConfirmModalVisible, setBlockConfirmModalVisible] = useState(false);
   const [blockUsername, setBlockUsername] = useState('');
+  const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons: {
+      text: string;
+      onPress?: () => void;
+      style?: 'default' | 'cancel' | 'destructive';
+    }[];
+  }>({ visible: false, title: '', message: '', buttons: [] });
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -175,15 +190,15 @@ const FastShiiiScreen = () => {
 
   const handleLogout = async () => {
     await AsyncStorage.removeItem('user');
-
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
+    setCustomAlert({
+      visible: true,
+      title: 'Sair da conta',
+      message: 'Tem certeza que deseja sair?',
+      buttons: [
+        { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
         { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
       ]
-    );
+    });
   };
 
   const handleImagePicker = async () => {
@@ -226,12 +241,26 @@ const FastShiiiScreen = () => {
 
   const handleAddPost = async () => {
     if (!user) {
-      Alert.alert('Erro', 'Usuário não autenticado.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Usuário não autenticado.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
     if (!inputText.trim() && !selectedImage) {
-      Alert.alert('Erro', 'Por favor, insira algum texto ou carregue uma imagem.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Por favor, insira algum texto ou carregue uma imagem.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
@@ -241,15 +270,47 @@ const FastShiiiScreen = () => {
       let imageBase64 = null;
 
       if (selectedImage) {
-        // Apenas converte para JPEG e base64, sem crop ou resize
-        const compressedImage = await ImageManipulator.manipulateAsync(
-          selectedImage,
-          [],
-          { 
-            format: ImageManipulator.SaveFormat.JPEG,
-            base64: true
+        let shouldCompress = false;
+
+        if (Platform.OS === 'web') {
+          // Na web, verificamos o tamanho do arquivo de uma maneira diferente
+          const response = await fetch(selectedImage);
+          const blob = await response.blob();
+          if (blob.size > 1048487) { // 1MB em bytes
+            shouldCompress = true;
           }
-        );
+        } else {
+          // Em dispositivos móveis, usamos FileSystem
+          const fileInfo = await FileSystem.getInfoAsync(selectedImage);
+          if (fileInfo.exists && fileInfo.size && fileInfo.size > 1048487) {
+            shouldCompress = true;
+          }
+        }
+
+        let compressedImage;
+        if (shouldCompress) {
+          // Comprime e redimensiona
+          compressedImage = await ImageManipulator.manipulateAsync(
+            selectedImage,
+            [{ resize: { width: 800 } }],
+            {
+              compress: 0.5,
+              format: ImageManipulator.SaveFormat.JPEG,
+              base64: true,
+            }
+          );
+        } else {
+          // Apenas converte para base64 sem compressão extra
+          compressedImage = await ImageManipulator.manipulateAsync(
+            selectedImage,
+            [],
+            {
+              format: ImageManipulator.SaveFormat.JPEG,
+              base64: true,
+            }
+          );
+        }
+
         if (compressedImage.base64) {
           imageBase64 = compressedImage.base64;
         }
@@ -257,7 +318,7 @@ const FastShiiiScreen = () => {
 
       const postData: Omit<Post, 'id'> = {
         userId: user.uid,
-        username: user.user,
+        username: user.username,
         content: inputText || '',
         text: inputText || '',
         timestamp: Date.now(),
@@ -269,13 +330,27 @@ const FastShiiiScreen = () => {
       const postDocRef = await addDoc(collection(firestore, 'posts'), postData);
       console.log('Postagem salva com ID:', postDocRef.id);
 
-      Alert.alert('Sucesso', 'Postagem adicionada com sucesso!');
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: 'Postagem adicionada com sucesso!',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       setInputText('');
       setSelectedImage(null);
       setCreatePostModalVisible(false);
     } catch (error: any) {
-      console.error('Erro ao adicionar postagem:', error.message);
-      Alert.alert('Erro vai se foder', 'Erro ao adicionar postagem:  ' + error.message);
+      console.error('Erro ao adicionar postagem:', error);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao adicionar postagem: ' + error.message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     } finally {
       setPosting(false);
     }
@@ -525,12 +600,26 @@ const FastShiiiScreen = () => {
 
   const handleCommentPost = async (postId: string, commentText: string) => {
     if (!user) {
-      Alert.alert('Erro', 'Você precisa estar autenticado para comentar em um post.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Você precisa estar autenticado para comentar em um post.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
     if (!commentText.trim()) {
-      Alert.alert('Erro', 'O comentário não pode estar vazio.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'O comentário não pode estar vazio.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
@@ -541,6 +630,7 @@ const FastShiiiScreen = () => {
       await updateDoc(postRef, {
         [`comments.${commentId}`]: {
           userId: user.uid,
+          username: user.username,
           text: commentText,
           timestamp: Date.now(),
         },
@@ -555,6 +645,7 @@ const FastShiiiScreen = () => {
                   ...post.comments,
                   [commentId]: {
                     userId: user.uid,
+                    username: user.username,
                     text: commentText,
                     timestamp: Date.now(),
                   },
@@ -564,8 +655,14 @@ const FastShiiiScreen = () => {
         )
       );
     } catch (error) {
-      console.error('Erro ao comentar no post:', error);
-      Alert.alert('Erro', 'Não foi possível adicionar o comentário.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível adicionar o comentário.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
@@ -575,39 +672,25 @@ const FastShiiiScreen = () => {
   };
 
   const handleBlockUser = () => {
-    setBlockUsername('');
     setBlockConfirmModalVisible(true);
   };
 
-  const handleConfirmBlock = () => {
-    if (blockUsername.trim() === selectedUser) {
-      Alert.alert(
-        'Usuário Bloqueado',
-        `Você bloqueou o usuário ${blockUsername}.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setBlockConfirmModalVisible(false);
-    setMoreOptionsVisible(false);
-            }
+  const handleConfirmBlock = (username: string) => {
+    setCustomAlert({
+      visible: true,
+      title: 'Usuário Bloqueado',
+      message: `Você bloqueou o usuário ${username}.`,
+      buttons: [
+        {
+          text: 'OK',
+          style: 'default',
+          onPress: () => {
+            setMoreOptionsVisible(false);
+            setCustomAlert(prev => ({ ...prev, visible: false }));
           }
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Erro',
-        'O nome digitado não corresponde ao usuário selecionado. Por favor, verifique e tente novamente.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setBlockUsername('');
-            }
-          }
-        ]
-      );
-    }
+        }
+      ]
+    });
   };
 
   const handleUsernamePress = (username: string, userId: string) => {
@@ -625,8 +708,10 @@ const FastShiiiScreen = () => {
     return (
       <TouchableOpacity
         onPress={() => {
-          setSelectedPost(item as unknown as Post);
-          setViewPostModalVisible(true);
+          router.push({
+            pathname: '/SubTelas/post_details',
+            params: { postId: item.id }
+          });
         }}
       >
         <View style={[styles.postContainer, { backgroundColor: themeColors.background }]}>
@@ -676,23 +761,7 @@ const FastShiiiScreen = () => {
               </Text>
               <TouchableOpacity
                 style={[styles.iconButton, { borderColor: themeColors.googleButton }]}
-                onPress={() =>
-                  Alert.prompt(
-                    'Adicionar Comentário',
-                    'Escreva seu comentário:',
-                    [
-                      {
-                        text: 'Cancelar',
-                        style: 'cancel',
-                      },
-                      {
-                        text: 'Enviar',
-                        onPress: (commentText) => handleCommentPost(item.id, commentText || ''),
-                      },
-                    ],
-                    'plain-text'
-                  )
-                }
+                onPress={() => setExpandedPostId(expandedPostId === item.id ? null : item.id)}
               >
                 <Ionicons name="chatbubble-outline" size={20} color={themeColors.googleButton} />
               </TouchableOpacity>
@@ -701,6 +770,68 @@ const FastShiiiScreen = () => {
               </Text>
             </View>
           </View>
+          {/* Comentários expandido */}
+          {expandedPostId === item.id && (
+            <View style={{ marginTop: 12 }}>
+              {Object.values(item.comments || {}).length === 0 ? (
+                <Text style={{ color: themeColors.googleButton, opacity: 0.7 }}>Nenhum comentário ainda.</Text>
+              ) : (
+                Object.values(item.comments || {})
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .map((comment: any, idx) => (
+                    <View key={idx} style={{ marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: 8 }}>
+                      <Text style={{ color: themeColors.tint, fontWeight: 'bold' }}>
+                        {comment.username || 'Usuário'}
+                      </Text>
+                      <Text style={{ color: themeColors.googleButton }}>{comment.text}</Text>
+                      <Text style={{ color: themeColors.googleButton, fontSize: 12, opacity: 0.6 }}>
+                        {new Date(comment.timestamp).toLocaleString()}
+                      </Text>
+                    </View>
+                  ))
+              )}
+              {/* Campo para adicionar novo comentário */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                <TextInput
+                  style={{
+                    flex: 1,
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    color: themeColors.googleButton,
+                    borderRadius: 8,
+                    padding: 8,
+                    marginRight: 8,
+                  }}
+                  placeholder="Escreva um comentário..."
+                  placeholderTextColor={themeColors.textSearch}
+                  value={expandedPostId === item.id ? inputText : ''}
+                  onChangeText={setInputText}
+                />
+                <TouchableOpacity
+                  onPress={() => {
+                    handleCommentPost(item.id, inputText);
+                    setInputText('');
+                  }}
+                  style={{
+                    backgroundColor: themeColors.tint,
+                    borderRadius: 8,
+                    padding: 8,
+                  }}
+                  disabled={!inputText.trim()}
+                >
+                  <Ionicons name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setExpandedPostId(null)}
+                  style={{
+                    marginLeft: 8,
+                    padding: 8,
+                  }}
+                >
+                  <Ionicons name="close" size={20} color={themeColors.googleButton} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -718,11 +849,25 @@ const FastShiiiScreen = () => {
   );
 
   const handleViewCommentPrivacy = () => {
-    Alert.alert('Configuração', 'Aqui você pode configurar quem pode ver seus comentários.');
+    setCustomAlert({
+      visible: true,
+      title: 'Configuração',
+      message: 'Aqui você pode configurar quem pode ver seus comentários.',
+      buttons: [
+        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+      ]
+    });
   };
 
   const handleBlockedUsers = () => {
-    Alert.alert('Configuração', 'Aqui você pode gerenciar os usuários bloqueados.');
+    setCustomAlert({
+      visible: true,
+      title: 'Configuração',
+      message: 'Aqui você pode gerenciar os usuários bloqueados.',
+      buttons: [
+        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+      ]
+    });
   };
 
   const handleNotificationToggle = (type: string, value: boolean) => {
@@ -1082,97 +1227,20 @@ const FastShiiiScreen = () => {
       </Modal>
 
         {/* Modal de Confirmação de Bloqueio */}
-        <Modal visible={blockConfirmModalVisible} transparent={true} animationType="fade">
-          <TouchableOpacity
-            style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}
-            activeOpacity={1}
-            onPress={() => setBlockConfirmModalVisible(false)}
-          >
-            <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
-              <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>Bloquear Usuário</Text>
-              <Text style={[styles.modalSubtitle, { color: themeColors.googleButton }]}>
-                Digite o nome do usuário que deseja bloquear:
-              </Text>
-              
-              {/* Nome do Usuário Flutuante */}
-              <TouchableOpacity 
-                style={[
-                  styles.floatingUsername,
-                  { 
-                    position: 'absolute',
-                    top: '-30%',
-                    left: 20,
-                    right: 20,
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    padding: 12,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.25,
-                    shadowRadius: 3.84,
-                    elevation: 5,
-                    zIndex: 1,
-                  }
-                ]}
-                onPress={() => {
-                  const parts = selectedUser?.split(' ') || [];
-                  let currentIndex = 0;
-                  const interval = setInterval(() => {
-                    if (currentIndex < parts.length) {
-                      setBlockUsername(prev => prev + (prev ? ' ' : '') + parts[currentIndex]);
-                      currentIndex++;
-                    } else {
-                      clearInterval(interval);
-                    }
-                  }, 200);
-                }}
-              >
-                <Text style={[styles.floatingUsernameText, { color: themeColors.googleButton }]}>
-                  {selectedUser}
-                </Text>
-              </TouchableOpacity>
-
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  { 
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    color: '#fff',
-                    borderColor: 'rgba(255,255,255,0.2)',
-                    borderWidth: 1,
-                    padding: 16,
-                    fontSize: 16,
-                    borderRadius: 12,
-                    marginVertical: 16,
-                  }
-                ]}
-                value={blockUsername}
-                onChangeText={setBlockUsername}
-                placeholder="Digite o nome do usuário"
-                placeholderTextColor={'rgba(255,255,255,0.5)'}
-                autoFocus={true}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={[styles.modalActionButton, { backgroundColor: themeColors.tint }]}
-                  onPress={handleConfirmBlock}
-                >
-                  <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Bloquear</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalActionButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
-                  onPress={() => setBlockConfirmModalVisible(false)}
-                >
-                  <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Cancelar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
+        <BlockUserModal
+          visible={blockConfirmModalVisible}
+          onClose={() => setBlockConfirmModalVisible(false)}
+          selectedUser={selectedUser}
+          onBlockUser={handleConfirmBlock}
+        />
       </LinearGradient>
+      <CustomAlert
+        visible={customAlert.visible}
+        title={customAlert.title}
+        message={customAlert.message}
+        buttons={customAlert.buttons}
+        onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };
@@ -1348,6 +1416,12 @@ const styles = StyleSheet.create({
     width: postWidth,
     paddingBottom: 16,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.73)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   modalContent: {
     width: postWidth + 32,
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -1409,26 +1483,70 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  floatingUsername: {
+    position: 'absolute',
+    top: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+    zIndex: 1,
+  },
+  floatingUsernameText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
   loadingIndicator: {
     marginVertical: 20,
   },
-  moreOptionsContainer: {
-    width: Math.min(windowWidth * 0.8, 300),
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-    padding: 20,
+  loadingMoreIndicator: {
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  moreOptionButton: {
-    width: '100%',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+  imageLoadingContainer: {
+    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
-  moreOptionText: {
-    fontSize: 16,
-    fontWeight: '600',
+  imageErrorContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  imageErrorText: {
+    color: '#ff5500',
+    marginTop: 8,
+    fontSize: 14,
+  },
+  imageContainer: {
+    position: 'relative',
+    width: postWidth,
+    height: postWidth * aspectRatio,
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+  },
+  imagePlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   drawerOverlay: {
     flex: 1,
@@ -1488,47 +1606,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FF0000',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.73)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cameraContainer: {
-    width: windowWidth,
-    height: windowHeight,
-    justifyContent: 'center',
-    backgroundColor: '#000',
-  },
-  camera: {
-    width: windowWidth,
-    height: windowHeight,
-  },
-  captureButton: {
-    position: 'absolute',
-    bottom: 20,
-    alignSelf: 'center',
-    backgroundColor: '#ff5500',
-    padding: 15,
-    borderRadius: 50,
-  },
-  captureButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  closeCameraButton: {
-    position: 'absolute',
-    top: 40,
-    right: 20,
-    backgroundColor: '#ff5500',
-    padding: 10,
-    borderRadius: 8,
-    zIndex: 999,
-  },
-  closeCameraButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
   modalClose: {
     position: 'absolute',
     top: 40,
@@ -1585,66 +1662,57 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderRadius: 10,
   },
-  loadingMoreIndicator: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  imageLoadingContainer: {
+  cameraContainer: {
+    width: windowWidth,
+    height: windowHeight,
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: '#000',
   },
-  imageErrorContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
+  camera: {
+    width: windowWidth,
+    height: windowHeight,
   },
-  imageErrorText: {
-    color: '#ff5500',
-    marginTop: 8,
-    fontSize: 14,
-  },
-  imageContainer: {
-    position: 'relative',
-    width: postWidth,
-    height: postWidth * aspectRatio,
-    backgroundColor: 'transparent',
-    overflow: 'hidden',
-  },
-  imagePlaceholder: {
+  captureButton: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
+    bottom: 20,
+    alignSelf: 'center',
+    backgroundColor: '#ff5500',
+    padding: 15,
+    borderRadius: 50,
   },
-  floatingUsername: {
-    position: 'absolute',
-    top: 100,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    padding: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 1,
-  },
-  floatingUsernameText: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  modalSubtitle: {
-    fontSize: 16,
+  captureButtonText: {
     color: '#fff',
-    marginBottom: 16,
-    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  closeCameraButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: '#ff5500',
+    padding: 10,
+    borderRadius: 8,
+    zIndex: 999,
+  },
+  closeCameraButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  moreOptionsContainer: {
+    width: Math.min(windowWidth * 0.8, 300),
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+  },
+  moreOptionButton: {
+    width: '100%',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  moreOptionText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
