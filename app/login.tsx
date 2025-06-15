@@ -3,24 +3,25 @@ import {
   View, 
   TextInput, 
   Text, 
-  Alert, 
   StyleSheet, 
   Image, 
   TouchableOpacity, 
   ActivityIndicator, 
   useColorScheme,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Keyboard,
+  ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import translations from '@/locales/translations';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc } from 'firebase/firestore';
 import { firestore } from '@/firebaseConfig';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
 // Idioma atual
 const currentLanguage = 'pt'; // Altere para 'en' para inglês
 
@@ -40,23 +41,43 @@ export default function LoginScreen() {
   const [password, setPassword] = useState(''); // Estado para a senha
   const [loading, setLoading] = useState(false); // Estado para controlar o carregamento
   const [showPassword, setShowPassword] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    buttons?: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
   const router = useRouter();
+  const params = useLocalSearchParams();
+
+  // Se vier do cadastro, preenche o e-mail
+  React.useEffect(() => {
+    if (params?.email) setEmail(String(params.email));
+    if (params?.password) setPassword(String(params.password));
+  }, [params]);
 
   const handleEmailChange = (text: string) => setEmail(text); // Atualiza o estado do e-mail
   const handlePasswordChange = (text: string) => setPassword(text); // Atualiza o estado da senha
 
   const handleLogin = async () => {
-    const normalizedEmail = email.toLowerCase(); // Converte o email para minúsculas
+    const normalizedEmail = email.toLowerCase();
 
     if (!normalizedEmail || !password) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Por favor, preencha todos os campos.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
-    setLoading(true); // Inicia o carregamento
+    setLoading(true);
 
     try {
-      // Consulta a coleção 'usuarios' procurando o email informado
       const usersQuery = query(
         collection(firestore, 'usuarios'),
         where('email', '==', normalizedEmail)
@@ -64,123 +85,183 @@ export default function LoginScreen() {
       const querySnapshot = await getDocs(usersQuery);
 
       if (querySnapshot.empty) {
-        Alert.alert('Erro', 'Usuário não encontrado.');
-        setLoading(false); // Finaliza o carregamento
+        setCustomAlert({
+          visible: true,
+          title: 'Usuário não encontrado',
+          message: 'Deseja se cadastrar com este e-mail?',
+          buttons: [
+            { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
+            { text: 'Cadastrar', style: 'default', onPress: () => {
+                setCustomAlert(prev => ({ ...prev, visible: false }));
+                router.push({ pathname: '/register', params: { email: normalizedEmail, password: password } });
+              }
+            }
+          ]
+        });
         return;
       }
 
-      let foundUser: User | null = null;
-      querySnapshot.forEach((doc) => {
-        const userData = doc.data();
-        if (userData && typeof userData === 'object' && 'email' in userData && 'password' in userData && 'user' in userData) {
-          foundUser = { 
-            id: doc.id, 
-            email: userData.email as string,
-            password: userData.password as string,
-            user: userData.user as string,
-            blockedUsers: userData.blockedUsers as string[]
-          };
-        }
-      });
-
-      if (!foundUser) {
-        Alert.alert('Erro', 'Usuário não encontrado.');
-        setLoading(false); // Finaliza o carregamento
+      // Pega o primeiro documento (deve ser único por email)
+      const doc = querySnapshot.docs[0];
+      const userData = doc.data();
+      
+      if (userData.password !== password) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Senha incorreta.',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
         return;
       }
 
-      if (foundUser.password !== password) {
-        Alert.alert('Erro', 'Senha incorreta.');
-        setLoading(false); // Finaliza o carregamento
-        return;
-      }
+      const user: User = {
+        id: doc.id,
+        email: userData.email,
+        password: userData.password,
+        user: userData.user,
+        blockedUsers: userData.blockedUsers || []
+      };
 
       // Armazena dados do usuário no AsyncStorage
       await AsyncStorage.setItem(
         'user',
-        JSON.stringify({ email: foundUser.email, uid: foundUser.id, username: foundUser.user })
+        JSON.stringify({
+          email: user.email,
+          uid: user.id,
+          username: user.user,
+          blockedUsers: user.blockedUsers
+        })
       );
-      Alert.alert('Sucesso', `Bem-vindo, ${foundUser.user}!`);
-      router.push('/(tabs)/feed');
+
+      setUser(user);
+      
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: `Bem-vindo, ${user.user}!`,
+        buttons: [
+          { 
+            text: 'OK', 
+            style: 'default', 
+            onPress: () => {
+              setCustomAlert(prev => ({ ...prev, visible: false }));
+              router.push('/(tabs)/feed');
+            }
+          }
+        ]
+      });
     } catch (error: any) {
       console.error('Erro no login:', error);
-      Alert.alert('Erro', 'Erro ao tentar fazer login.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao tentar fazer login: ' + (error.message || 'Erro desconhecido'),
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     } finally {
-      setLoading(false); // Finaliza o carregamento
+      setLoading(false);
     }
   };
-
+  const register = () => {
+    Keyboard.dismiss();
+    setTimeout(() => {
+      router.push({ pathname: '/register', params: { email: email, password: password } });
+    }, 200);
+  }
+  const login = () => {
+    Keyboard.dismiss();
+    setTimeout(() => {
+      handleLogin();
+    }, 200);
+  }
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: themeColors.background }]}
     >
       <LinearGradient
-        colors={[themeColors.background, themeColors.background]} // Gradiente baseado no tema
+        colors={[themeColors.background, themeColors.background]}
         style={styles.gradient}
       >
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('@/assets/icons/aguiaa.png')} 
-            style={[styles.logo, { tintColor: themeColors.tint }]} 
-          />
-        </View>
-
-        <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
-            <TextInput
-              placeholder={translations[currentLanguage].login.email_placeholder}
-              value={email}
-              onChangeText={handleEmailChange} // Atualiza o estado do e-mail
-              style={[styles.input, { color: themeColors.text }]}
-              keyboardType="email-address"
-              placeholderTextColor={themeColors.icon}
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('@/assets/icons/aguiaa.png')} 
+              style={[styles.logo, { tintColor: themeColors.tint }]} 
             />
           </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
-            <TextInput
-              placeholder={translations[currentLanguage].login.password_placeholder}
-              value={password}
-              onChangeText={handlePasswordChange} // Atualiza o estado da senha
-              style={[styles.input, { color: themeColors.text }]}
-              secureTextEntry={!showPassword}
-              placeholderTextColor={themeColors.icon}
-            />
-            <TouchableOpacity 
-              onPress={() => setShowPassword(!showPassword)}
-              style={styles.eyeIcon}
-            >
-              <Ionicons 
-                name={showPassword ? "eye-off-outline" : "eye-outline"} 
-                size={24} 
-                color={themeColors.tint} 
+          <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>  
+            <Text style={[styles.label, { color: themeColors.textSearch }]}>E-mail</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="mail-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+              <TextInput
+                placeholder={translations[currentLanguage].login.email_placeholder}
+                value={email}
+                onChangeText={handleEmailChange}
+                style={[styles.input, { color: themeColors.text }]}
+                keyboardType="email-address"
+                placeholderTextColor={themeColors.icon}
+                autoCapitalize="none"
+                autoComplete="email"
+                textContentType="emailAddress"
               />
+            </View>
+            <Text style={[styles.label, { color: themeColors.textSearch }]}>Senha</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+              <TextInput
+                placeholder={translations[currentLanguage].login.password_placeholder}
+                value={password}
+                onChangeText={handlePasswordChange}
+                style={[styles.input, { color: themeColors.text }]}
+                secureTextEntry={!showPassword}
+                placeholderTextColor={themeColors.icon}
+                autoCapitalize="none"
+                autoComplete="password"
+                textContentType="password"
+              />
+              <TouchableOpacity 
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeIcon}
+                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                <Ionicons 
+                  name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                  size={24} 
+                  color={themeColors.tint} 
+                />
+              </TouchableOpacity>
+            </View>
+            {loading ? (
+              <ActivityIndicator size="large" color={themeColors.tint} style={styles.loadingIndicator} />
+            ) : (
+              <TouchableOpacity
+                style={[styles.loginButton, { backgroundColor: themeColors.tint }]}
+                onPress={login}
+              >
+                <Text style={styles.loginButtonText}>
+                  {translations[currentLanguage].login.login_button}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={register} style={styles.registerLink}>
+              <Text style={[styles.registerLinkText, { color: themeColors.tint }]}>Ainda não tem conta? Cadastre-se</Text>
             </TouchableOpacity>
           </View>
-
-          {loading ? (
-            <ActivityIndicator size="large" color={themeColors.tint} style={styles.loadingIndicator} />
-          ) : (
-            <TouchableOpacity
-              style={[styles.loginButton, { backgroundColor: themeColors.tint }]}
-              onPress={handleLogin}
-            >
-              <Text style={styles.loginButtonText}>
-                {translations[currentLanguage].login.login_button}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <Link href="/register" style={styles.registerLink}>
-            <Text style={[styles.registerLinkText, { color: themeColors.tint }]}>
-              {translations[currentLanguage].login.register_link}
-            </Text>
-          </Link>
-        </View>
+        </ScrollView>
       </LinearGradient>
+      <CustomAlert
+        visible={customAlert.visible}
+        title={customAlert.title}
+        message={customAlert.message}
+        buttons={customAlert.buttons}
+        onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -260,5 +341,10 @@ const styles = StyleSheet.create({
   },
   loadingIndicator: {
     marginTop: 20,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
   },
 });

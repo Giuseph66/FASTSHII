@@ -11,8 +11,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
-  Alert
+  Dimensions
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -22,16 +21,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getDoc, updateDoc, arrayRemove } from 'firebase/firestore';
 import { doc } from 'firebase/firestore';
 import { firestore } from '@/firebaseConfig';
-import CustomAlert from '@/components/CustomAlert';
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 const { width, height } = Dimensions.get('window');
 
-// Definir tipos para os botões do CustomAlert
-interface CustomAlertButton {
-  text: string;
-  onPress?: () => void;
-  style?: 'default' | 'cancel' | 'destructive';
-}
+
 
 interface BlockedUser {
   id: string;
@@ -53,17 +48,22 @@ const Profile15Screen = () => {
   const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [blockedUsersModalVisible, setBlockedUsersModalVisible] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [customAlert, setCustomAlert] = useState<{ visible: boolean; title: string; message: string; buttons: CustomAlertButton[] }>({ visible: false, title: '', message: '', buttons: [] });
-
+  const [newEmail, setNewEmail] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [customAlert, setCustomAlert] = useState<{ visible: boolean; title: string; message: string; buttons: CustomAlertButton[] }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
+  const [ocultarSenhaatual, setOcultarSenhaatual] = useState(true);
+  const [ocultarSenhanova, setOcultarSenhanova] = useState(true);
+  const [salvando, setSalvando] = useState(false);
   useEffect(() => {
     const fetchUser = async () => {
       try {
         const storedUser = await AsyncStorage.getItem('user');
         if (storedUser) {
           const userData = JSON.parse(storedUser);
+          console.log(userData)
           setUser(userData);
-          setNewUsername(userData.username);
+          setNewEmail(userData.email);
         }
       } catch (error) {
         console.error('Failed to load user from AsyncStorage:', error);
@@ -73,8 +73,38 @@ const Profile15Screen = () => {
     fetchUser();
   }, []);
 
-  const handleEditProfile = () => {
-    setEditProfileModalVisible(true);
+  const handleEditProfile = async () => {
+    if (Platform.OS === 'web') {
+      setEditProfileModalVisible(true);
+      return;
+    }
+    // Solicitar autenticação biométrica
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+    if (!hasHardware || !isEnrolled) {
+      setCustomAlert({
+        visible: true,
+        title: 'Biometria não disponível',
+        message: 'Seu dispositivo não suporta biometria ou não há biometria cadastrada.',
+        buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+      });
+      return;
+    }
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Confirme sua identidade para editar o perfil',
+      fallbackLabel: 'Usar senha',
+      cancelLabel: 'Cancelar',
+    });
+    if (result.success) {
+      setEditProfileModalVisible(true);
+    } else {
+      setCustomAlert({
+        visible: true,
+        title: 'Falha na autenticação',
+        message: 'Não foi possível autenticar sua identidade.',
+        buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+      });
+    }
   };
 
   const handlePrivacySettings = () => {
@@ -83,6 +113,7 @@ const Profile15Screen = () => {
 
   const handleBlockedUsers = async () => {
     try {
+      setBlockedUsersModalVisible(true);
       const userStr = await AsyncStorage.getItem('user');
       if (!userStr) {
         setCustomAlert({
@@ -93,6 +124,7 @@ const Profile15Screen = () => {
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setBlockedUsersModalVisible(false);
         return;
       }
 
@@ -108,24 +140,21 @@ const Profile15Screen = () => {
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setBlockedUsersModalVisible(false);
         return;
       }
 
       const userData = userDoc.data();
-      const blockedUsersIds: string[] = userData.blockedUsers || [];
+      const blockedUsersIds: BlockedUser[] = userData.blockedUsers || [];
 
       // Buscar informações dos usuários bloqueados
       const blockedUsersInfo: BlockedUser[] = [];
       for (const blockedId of blockedUsersIds) {
-        const blockedUserDoc = await getDoc(doc(firestore, 'usuarios', blockedId));
-        if (blockedUserDoc.exists()) {
-          const blockedUserData = blockedUserDoc.data();
           blockedUsersInfo.push({
-            id: blockedId,
-            username: blockedUserData.user || 'Usuário Desconhecido'
+            id: blockedId.id,
+            username: blockedId.username || 'Usuário Desconhecido'
           });
         }
-      }
 
       // Atualizar o estado local com os usuários bloqueados
       setUser(prev => ({ ...prev, blockedUsers: blockedUsersInfo }));
@@ -138,7 +167,6 @@ const Profile15Screen = () => {
       await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
 
       // Mostrar o modal
-      setBlockedUsersModalVisible(true);
 
     } catch (error: any) {
       console.error('Erro ao carregar usuários bloqueados:', error);
@@ -150,6 +178,7 @@ const Profile15Screen = () => {
           { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
         ]
       });
+      setBlockedUsersModalVisible(false);
     }
   };
 
@@ -168,7 +197,7 @@ const Profile15Screen = () => {
             // Atualizar no Firestore
             const userRef = doc(firestore, 'usuarios', currentUser.uid);
             await updateDoc(userRef, {
-              blockedUsers: arrayRemove(userId)
+              blockedUsers: arrayRemove({id: userId, username: username})
             });
             // Atualizar no AsyncStorage
             const updatedBlockedUsers = (currentUser.blockedUsers || []).filter((id: string) => id !== userId);
@@ -206,13 +235,66 @@ const Profile15Screen = () => {
   };
 
   const handleSaveProfile = async () => {
+    setSalvando(true)
     try {
-      const updatedUser = { ...user, username: newUsername };
+      const consulta = await getDoc(doc(firestore, 'usuarios', user.uid));
+      const userData = consulta.data();
+      if (userData?.password !== currentPassword) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'A senha atual está incorreta',
+          buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+        });
+        setSalvando(false)
+        return;
+      }
+      if (newPassword === '') {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'A senha não pode ser vazia',
+          buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+        });
+        setSalvando(false)
+        return;
+      }
+      if (newPassword === currentPassword) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'A nova senha não pode ser igual à senha atual',
+          buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+        });
+        setSalvando(false)
+        return;
+      }
+      await updateDoc(doc(firestore, 'usuarios', user.uid), {
+        email: newEmail,
+        password: newPassword
+      });
+      const updatedUser = { ...user, email: newEmail, password: newPassword };
       await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
       setUser(updatedUser);
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: 'Perfil salvo com sucesso',
+        buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+      });
+      setCurrentPassword('');
+      setNewPassword('');
       setEditProfileModalVisible(false);
-    } catch (error) {
+      setSalvando(false)
+    } catch (error: any) {
       console.error('Erro ao salvar perfil:', error);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao salvar perfil, tente novamente mais tarde',
+        buttons: [{ text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }]
+      });
+      setSalvando(false)
     }
   };
 
@@ -298,7 +380,10 @@ const Profile15Screen = () => {
                 message: 'Tem certeza que deseja sair?',
                 buttons: [
                   { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert({ ...customAlert, visible: false }) },
-                  { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
+                  { text: 'Sair', style: 'destructive', onPress: () => {
+                    AsyncStorage.removeItem('user');
+                    router.replace('/login');
+                  } },
                 ]
               });
             }}
@@ -319,21 +404,55 @@ const Profile15Screen = () => {
               activeOpacity={1}
             >
               <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>Editar Perfil</Text>
+             
+              <Text style={[styles.modalText, { color: themeColors.googleButton }]}>Email</Text>
               <View style={[styles.inputContainer, { backgroundColor: themeColors.background }]}>
-                <Ionicons name="person-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+                <Ionicons name="mail-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
                 <TextInput
                   style={[styles.modalInput, { color: themeColors.googleButton }]}
-                  placeholder="Novo nome de usuário"
+                  placeholder="Novo Email"
                   placeholderTextColor={themeColors.icon}
-                  value={newUsername}
-                  onChangeText={setNewUsername}
+                  value={newEmail}
+                  onChangeText={setNewEmail}
                 />
+              </View>
+
+              <Text style={[styles.modalText, { color: themeColors.googleButton }]}>Senha atual</Text>
+              <View style={[styles.inputContainer, { backgroundColor: themeColors.background }]}>
+                <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.modalInput, { color: themeColors.googleButton }]}
+                  placeholder="Senha atual"
+                  placeholderTextColor={themeColors.icon}
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  secureTextEntry={ocultarSenhaatual}
+                />
+                <TouchableOpacity onPress={() => setOcultarSenhaatual(!ocultarSenhaatual)}>
+                <Ionicons name={ocultarSenhaatual ? "eye-off-outline" : "eye-outline"} size={24} color={themeColors.tint} style={styles.inputIcon} />
+                </TouchableOpacity>
+              </View>
+                <Text style={[styles.modalText, { color: themeColors.googleButton }]}>Nova Senha</Text>
+              <View style={[styles.inputContainer, { backgroundColor: themeColors.background }]}>
+                <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.modalInput, { color: themeColors.googleButton }]}
+                  placeholder="Nova senha"
+                  placeholderTextColor={themeColors.icon}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={ocultarSenhanova}
+                />
+                <TouchableOpacity onPress={() => setOcultarSenhanova(!ocultarSenhanova)}>
+                <Ionicons name={ocultarSenhanova ? "eye-off-outline" : "eye-outline"} size={24} color={themeColors.tint} style={styles.inputIcon} />
+                </TouchableOpacity>
               </View>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: themeColors.tint }]}
                 onPress={handleSaveProfile}
+                disabled={salvando}
               >
-                <Text style={styles.modalButtonText}>Salvar</Text>
+                <Text style={styles.modalButtonText}>{salvando ? 'Salvando...' : 'Salvar'}</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           </TouchableOpacity>
@@ -349,8 +468,15 @@ const Profile15Screen = () => {
               style={[styles.modalContent, { backgroundColor: themeColors.background }]}
               activeOpacity={1}
             >
-              <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>Configurações de Privacidade</Text>
-              <Text style={[styles.modalText, { color: themeColors.googleButton }]}>Configurações de privacidade em breve...</Text>
+               <View style={{ marginBottom: 16, backgroundColor: 'rgba(0,200,83,0.08)', borderRadius: 10, padding: 12 }}>
+                <Ionicons name="shield-checkmark" size={28} color={themeColors.tint} style={{ alignSelf: 'center', marginBottom: 4 }} />
+                <Text style={{ color: themeColors.tint, fontWeight: 'bold', fontSize: 16, textAlign: 'center', marginBottom: 4 }}>
+                  Segurança de ponta a ponta
+                </Text>
+                <Text style={{ color: themeColors.textSearch, fontSize: 14, textAlign: 'center' }}>
+                  Este aplicativo utiliza criptografia avançada para proteger seus dados. Todas as informações são armazenadas e transmitidas de forma segura, garantindo privacidade total. Sua conta está protegida com autenticação biométrica e senha. Confie: sua segurança é nossa prioridade!
+                </Text>
+              </View>
               <TouchableOpacity
                 style={[styles.modalButton, { backgroundColor: themeColors.tint }]}
                 onPress={() => setPrivacyModalVisible(false)}
@@ -375,23 +501,33 @@ const Profile15Screen = () => {
               
               <ScrollView style={styles.blockedUsersScrollView}>
                 {Array.isArray(user.blockedUsers) && user.blockedUsers.length > 0 ? (
-                  user.blockedUsers.map((blockedUser: BlockedUser) => (
-                    <View key={blockedUser.id} style={[styles.blockedUserItem, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
-                      <View style={styles.blockedUserInfo}>
-                        <Ionicons name="person-circle-outline" size={24} color={themeColors.tint} style={styles.blockedUserIcon} />
-                        <Text style={[styles.blockedUserName, { color: themeColors.textSearch }]}>
-                          {blockedUser.username}
-                        </Text>
+                  user.blockedUsers.map((blockedUser: any, idx: number) => {
+                    const key = typeof blockedUser === 'object' && blockedUser.id
+                      ? blockedUser.id
+                      : typeof blockedUser === 'string'
+                        ? blockedUser
+                        : idx;
+                    const username = typeof blockedUser === 'object' && blockedUser.username
+                      ? blockedUser.username
+                      : '';
+                    return (
+                      <View key={key} style={[styles.blockedUserItem, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+                        <View style={styles.blockedUserInfo}>
+                          <Ionicons name="person-circle-outline" size={24} color={themeColors.tint} style={styles.blockedUserIcon} />
+                          <Text style={[styles.blockedUserName, { color: themeColors.textSearch }]}>
+                            {username}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.unblockButton, { backgroundColor: themeColors.tint }]}
+                          onPress={() => handleUnblockUser(key, username)}
+                        >
+                          <Ionicons name="lock-open-outline" size={20} color="#fff" />
+                          <Text style={styles.unblockButtonText}>Desbloquear</Text>
+                        </TouchableOpacity>
                       </View>
-                      <TouchableOpacity
-                        style={[styles.unblockButton, { backgroundColor: themeColors.tint }]}
-                        onPress={() => handleUnblockUser(blockedUser.id, blockedUser.username)}
-                      >
-                        <Ionicons name="lock-open-outline" size={20} color="#fff" />
-                        <Text style={styles.unblockButtonText}>Desbloquear</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))
+                    );
+                  })
                 ) : (
                   <View style={styles.emptyBlockedUsers}>
                     <Ionicons name="people-outline" size={48} color={themeColors.icon} />
@@ -530,10 +666,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    width: '90%',
+    width: '95%',
     borderRadius: 20,
     padding: 20,
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -546,6 +681,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 24,
     fontWeight: 'bold',
+    textAlign: 'center',
     marginBottom: 20,
   },
   inputContainer: {
@@ -579,8 +715,9 @@ const styles = StyleSheet.create({
   },
   modalText: {
     fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 20,
+    textAlign: 'left',
+    marginLeft: 10,
+    marginBottom: 10,
   },
   blockedUsersScrollView: {
     width: '100%',

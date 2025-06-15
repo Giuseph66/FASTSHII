@@ -116,4 +116,5 @@ const styles = StyleSheet.create({
   },
 });
 
+export type { CustomAlertButton };
 export default CustomAlert; 

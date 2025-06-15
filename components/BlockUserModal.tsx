@@ -7,14 +7,13 @@ import {
   Modal,
   StyleSheet,
   Dimensions,
-  Alert,
 } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from 'react-native';
 import { doc, updateDoc, getDoc, arrayUnion, where, collection, query, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
-import CustomAlert from '@/components/CustomAlert';
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
  
 
 interface BlockUserModalProps {
@@ -34,19 +33,17 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
   const [blockUsername, setBlockUsername] = useState('');
+  const [loginConfirmation, setLoginConfirmation] = useState(false);
   const [customAlert, setCustomAlert] = useState<{
     visible: boolean;
     title: string;
     message: string;
-    buttons: {
-      text: string;
-      onPress?: () => void;
-      style?: 'default' | 'cancel' | 'destructive';
-    }[];
-  }>({ visible: false, title: '', message: '', buttons: [] });
+    buttons: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
   
   const handleConfirmBlock = async () => {
     try {
+      setLoginConfirmation(true)
       if (!blockUsername.trim() || !selectedUser) {
         setCustomAlert({
           visible: true,
@@ -56,6 +53,7 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setLoginConfirmation(false)
         return;
       }
 
@@ -68,6 +66,7 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setLoginConfirmation(false)
         return;
       }
 
@@ -82,6 +81,7 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setLoginConfirmation(false)
         return;
       }
 
@@ -103,6 +103,7 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setLoginConfirmation(false)
         return;
       }
 
@@ -119,17 +120,34 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
         });
+        setBlockUsername('')
+        setLoginConfirmation(false)
         return;
       }
 
       // Atualizar o documento do usuário logado no Firestore
       const currentUserRef = doc(firestore, 'usuarios', currentUser.uid);
       await updateDoc(currentUserRef, {
-        blockedUsers: arrayUnion(userToBlockId)
+        blockedUsers: arrayUnion({id: userToBlockId, username: blockUsername})
       });
-
+      console.log(currentUser.blockedUsers)
       // Atualizar o AsyncStorage com a nova lista de usuários bloqueados
-      const updatedBlockedUsers = [...(currentUser.blockedUsers || []), userToBlockId];
+      if (currentUser.blockedUsers) {
+        if (currentUser.blockedUsers.includes({id: userToBlockId, username: blockUsername})) {
+          setCustomAlert({
+            visible: true,
+            title: 'Erro',
+            message: 'Usuário já bloqueado',
+            buttons: [
+              { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+            ]
+          });
+          setBlockUsername('')
+          setLoginConfirmation(false)
+          return;
+        }
+      }
+      const updatedBlockedUsers = [...(currentUser.blockedUsers || []), {id: userToBlockId, username: blockUsername}];
       const updatedUserData = {
         ...currentUser,
         blockedUsers: updatedBlockedUsers
@@ -137,9 +155,10 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
       await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
 
       // Notificar sucesso
+      setLoginConfirmation(false)
       onBlockUser(blockUsername);
       setBlockUsername('');
-      onClose();
+      onClose()
 
     } catch (error: any) {
       console.error('Erro ao bloquear usuário:', error);
@@ -151,6 +170,7 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
           { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
         ]
       });
+      setLoginConfirmation(false)
     }
   };
 
@@ -197,13 +217,14 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
             style={[
               styles.modalInput,
               { 
-                backgroundColor: 'rgba(255,255,255,0.1)',
+                backgroundColor: loginConfirmation ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.1)',
                 color: '#fff',
                 borderColor: 'rgba(255,255,255,0.2)',
               }
             ]}
             value={blockUsername}
             onChangeText={setBlockUsername}
+            editable={!loginConfirmation}
             placeholder="Digite o nome do usuário"
             placeholderTextColor={'rgba(255,255,255,0.5)'}
             autoFocus={true}
@@ -212,13 +233,14 @@ const BlockUserModal: React.FC<BlockUserModalProps> = ({
           />
           <View style={styles.modalActions}>
             <TouchableOpacity
-              style={[styles.modalActionButton, { backgroundColor: themeColors.tint }]}
+              style={[styles.modalActionButton, { backgroundColor: loginConfirmation ? 'rgba(255,255,255,0.1)' : themeColors.tint }]}
+              disabled={loginConfirmation}
               onPress={handleConfirmBlock}
             >
-              <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Bloquear</Text>
+              <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>{loginConfirmation ? 'Bloqueando...' : 'Bloquear'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.modalActionButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
+              style={[styles.modalActionButton, { backgroundColor: loginConfirmation ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.1)' }]}
               onPress={onClose}
             >
               <Text style={[styles.modalActionButtonText, { color: '#fff' }]}>Cancelar</Text>

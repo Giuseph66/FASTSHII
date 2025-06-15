@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ImageViewer from 'react-native-image-zoom-viewer';
 import BlockUserModal from '@/components/BlockUserModal';
 import CommentItem from '@/components/CommentItem';
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
 
 const windowWidth = Dimensions.get('window').width;
 const windowHeight = Dimensions.get('window').height;
@@ -74,7 +75,12 @@ const PostDetailsScreen = () => {
   const [blockModalVisible, setBlockModalVisible] = useState(false);
   const [isMe, setIsMe] = useState(false);
   const [commentUsernames, setCommentUsernames] = useState<{ [userId: string]: string }>({});
-
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    buttons?: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
   useEffect(() => {
     const loadData = async () => {
       console.log( "postId", postId);
@@ -153,7 +159,14 @@ const PostDetailsScreen = () => {
 
   const handleLike = async () => {
     if (!user) {
-      Alert.alert('Erro', 'Você precisa estar autenticado para curtir um post.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Você precisa estar autenticado para curtir um post.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
@@ -185,13 +198,27 @@ const PostDetailsScreen = () => {
       setLikesCount(prev => isLiked ? prev - 1 : prev + 1);
     } catch (error) {
       console.error('Erro ao curtir o post:', error);
-      Alert.alert('Erro', 'Não foi possível curtir o post.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível curtir o post.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
   const handleComment = async () => {
     if (!user || !user.uid || !post || !commentText.trim()) {
-      Alert.alert('Erro', 'Usuário não autenticado ou comentário vazio.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Usuário não autenticado ou comentário vazio.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
@@ -213,7 +240,14 @@ const PostDetailsScreen = () => {
       setCommentText('');
     } catch (error) {
       console.error('Erro ao adicionar comentário:', error);
-      Alert.alert('Erro', 'Não foi possível adicionar o comentário.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível adicionar o comentário.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
@@ -242,18 +276,15 @@ const PostDetailsScreen = () => {
 
   const handleConfirmBlock = (username: string) => {
     console.log( "handleConfirmBlock", username);
-    Alert.alert(
-      'Usuário Bloqueado',
-      `Você bloqueou o usuário ${username}.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            router.back();
-          }
-        }
+    setCustomAlert({
+      visible: true,
+      title: 'Usuário Bloqueado',
+      message: `Você bloqueou o usuário ${username}.`,
+      buttons: [
+        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
       ]
-    );
+    });
+    router.back();
   };
 
   // Função auxiliar para obter a chave do comentário
@@ -490,6 +521,13 @@ const PostDetailsScreen = () => {
           onClose={() => setBlockModalVisible(false)}
           selectedUser={postUser?.user || null}
           onBlockUser={handleConfirmBlock}
+        />
+        <CustomAlert
+          visible={customAlert.visible}
+          title={customAlert.title}
+          message={customAlert.message}
+          buttons={customAlert.buttons}
+          onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
         />
       </LinearGradient>
     </KeyboardAvoidingView>

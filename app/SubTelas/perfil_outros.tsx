@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   StatusBar,
-  Alert
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
@@ -193,8 +192,7 @@ const UserProfileScreen = () => {
     setLoading_message(true)
     console.log( "profile?.user", profile?.user);
     console.log( "myUser?.username", myUser?.username);
-    if(profile?.user === myUser?.username){
-      profile.user = "Eu";}
+    const displayName = profile?.user === myUser?.username ? "Eu" : (profile?.user || '');
     if (!profile?.user || !myUser?.username) {
       setCustomAlert({
         visible: true,
@@ -206,7 +204,7 @@ const UserProfileScreen = () => {
       });
       return;
     }
-    const userA = profile.user;
+    const userA = displayName;
     const userB = myUser.username;
     const chatsRef = collection(firestore, 'chats');
     // Buscar todos os chats onde o usuário logado participa
@@ -254,7 +252,7 @@ const UserProfileScreen = () => {
         lastMessage: '',
         lastMessageTime: Date.now(),
       });
-      const displayName = customNames[otherUser] || otherUser;
+      const displayName = foundChat.data().customNames[otherUser] || otherUser;
       router.push({
         pathname: '/SubTelas/chat',
         params: {

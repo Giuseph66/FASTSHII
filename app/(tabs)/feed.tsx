@@ -9,7 +9,6 @@ import {
   StyleSheet,
   Switch,
   Modal,
-  Alert,
   Image,
   RefreshControl,
   ActivityIndicator,
@@ -23,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { firestore } from '@/firebaseConfig';
-import { collection, addDoc, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy, getDocs, limit, startAfter } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy, getDocs, limit, startAfter, getDoc } from 'firebase/firestore';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { fetchUsers, fetchImages, fetchPosts } from '@/utils/firebaseQueries';
@@ -52,13 +51,19 @@ interface Post {
   likes: Record<string, boolean>;
   comments: Record<string, Comment>;
   imageBase64: string | null;
+  base64: string | null;
 }
 
+interface BlockedUser {
+  id: string;
+  username: string;
+}
 interface User {
   uid: string;
   user: string;
   email: string;
   username: string;
+  blockedUsers: BlockedUser[];
 }
 
 interface CachedImage {
@@ -138,6 +143,7 @@ const FastShiiiScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [blockedUsersModalVisible, setBlockedUsersModalVisible] = useState(false);
   const [moreOptionsVisible, setMoreOptionsVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -196,7 +202,10 @@ const FastShiiiScreen = () => {
       message: 'Tem certeza que deseja sair?',
       buttons: [
         { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
-        { text: 'Sair', style: 'destructive', onPress: () => router.replace('/login') },
+        { text: 'Sair', style: 'destructive', onPress: () => {
+          AsyncStorage.removeItem('user');
+          router.replace('/login');
+        } },
       ]
     });
   };
@@ -217,7 +226,14 @@ const FastShiiiScreen = () => {
     if (!permission?.granted) {
       const permissionResult = await requestPermission();
       if (!permissionResult.granted) {
-        Alert.alert('Permissão Negada', 'Você precisa conceder permissão para usar a câmera.');
+        setCustomAlert({
+          visible: true,
+          title: 'Permissão Negada',
+          message: 'Você precisa conceder permissão para usar a câmera.',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
         return;
       }
     }
@@ -234,7 +250,14 @@ const FastShiiiScreen = () => {
         }
       } catch (error) {
         console.error('Erro ao capturar foto:', error);
-        Alert.alert('Erro', 'Não foi possível capturar a foto.');
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Não foi possível capturar a foto.',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
       }
     }
   };
@@ -325,6 +348,7 @@ const FastShiiiScreen = () => {
         likes: {},
         comments: {},
         imageBase64: imageBase64,
+        base64: imageBase64,
       };
 
       const postDocRef = await addDoc(collection(firestore, 'posts'), postData);
@@ -416,8 +440,10 @@ const FastShiiiScreen = () => {
 
   const fetchPostsWithPagination = async (isInitialLoad = false) => {
     if (!isInitialLoad && (!pagination.hasMore || isLoadingMore)) return;
-
-    setIsLoadingMore(true);
+    const user = await AsyncStorage.getItem('user');
+    const userData = JSON.parse(user || '{}');
+    setUser(userData as User)
+    console.log(userData?.blockedUsers)
     try {
       const postsRef = collection(firestore, 'posts');
       let queryRef = query(postsRef, orderBy('timestamp', 'desc'), limit(pagination.pageSize));
@@ -448,7 +474,6 @@ const FastShiiiScreen = () => {
 
       // Buscar usuários em paralelo
       const users = await fetchUsers() as User[];
-      
       // Formatar posts com informações de usuário e tempo
       const formattedPosts = newPosts.map((post: Post): FormattedPost => {
         const user = users.find((u: User) => u.uid === post.userId);
@@ -480,16 +505,18 @@ const FastShiiiScreen = () => {
           imageBase64: post.imageBase64 || null,
           timestamp: post.timestamp,
         };
-      });
-
+      }); 
+      const blockedUsers = userData?.blockedUsers.map((user: BlockedUser) => user.id) || [];
+      const filteredPosts = formattedPosts.filter((post: FormattedPost) => !blockedUsers.includes(post.userId));
+      
       // Ordenar posts baseado na escolha do usuário
       const sortedPosts = choiceChipsValue === 'Populares'
-        ? formattedPosts.sort((a, b) => {
+        ? filteredPosts.sort((a, b) => {
             const aScore = (Object.keys(a.likes).length + Object.keys(a.comments).length) / 2;
             const bScore = (Object.keys(b.likes).length + Object.keys(b.comments).length) / 2;
             return bScore - aScore;
           })
-        : formattedPosts.sort((a, b) => b.timestamp - a.timestamp);
+        : filteredPosts.sort((a, b) => b.timestamp - a.timestamp);
 
       if (isInitialLoad) {
         setPosts(sortedPosts as unknown as Post[]);
@@ -561,7 +588,14 @@ const FastShiiiScreen = () => {
 
   const handleLikePost = async (postId: string) => {
     if (!user) {
-      Alert.alert('Erro', 'Você precisa estar autenticado para curtir um post.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Você precisa estar autenticado para curtir um post.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return;
     }
 
@@ -594,7 +628,14 @@ const FastShiiiScreen = () => {
       );
     } catch (error) {
       console.error('Erro ao curtir o post:', error);
-      Alert.alert('Erro', 'Não foi possível curtir o post.');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível curtir o post.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
@@ -674,8 +715,9 @@ const FastShiiiScreen = () => {
   const handleBlockUser = () => {
     setBlockConfirmModalVisible(true);
   };
-
+  
   const handleConfirmBlock = (username: string) => {
+    fetchPostsWithPagination(true);
     setCustomAlert({
       visible: true,
       title: 'Usuário Bloqueado',
@@ -848,28 +890,6 @@ const FastShiiiScreen = () => {
     </TouchableOpacity>
   );
 
-  const handleViewCommentPrivacy = () => {
-    setCustomAlert({
-      visible: true,
-      title: 'Configuração',
-      message: 'Aqui você pode configurar quem pode ver seus comentários.',
-      buttons: [
-        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
-      ]
-    });
-  };
-
-  const handleBlockedUsers = () => {
-    setCustomAlert({
-      visible: true,
-      title: 'Configuração',
-      message: 'Aqui você pode gerenciar os usuários bloqueados.',
-      buttons: [
-        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
-      ]
-    });
-  };
-
   const handleNotificationToggle = (type: string, value: boolean) => {
     switch (type) {
       case 'commentReplies':
@@ -917,6 +937,129 @@ const FastShiiiScreen = () => {
     }
   };
 
+  const handleBlockedUsers = async () => {
+    try {
+      setBlockedUsersModalVisible(true);
+      const userStr = await AsyncStorage.getItem('user');
+      if (!userStr) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Usuário não autenticado',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
+        setBlockedUsersModalVisible(false);
+        return;
+      }
+
+      const currentUser = JSON.parse(userStr);
+      const userDoc = await getDoc(doc(firestore, 'usuarios', currentUser.uid));
+      
+      if (!userDoc.exists()) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Usuário não encontrado',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
+        setBlockedUsersModalVisible(false);
+        return;
+      }
+
+      const userData = userDoc.data();
+      const blockedUsersIds: BlockedUser[] = userData.blockedUsers || [];
+
+      // Buscar informações dos usuários bloqueados
+      const blockedUsersInfo: BlockedUser[] = [];
+      for (const blockedId of blockedUsersIds) {
+          blockedUsersInfo.push({
+            id: blockedId.id,
+            username: blockedId.username || 'Usuário Desconhecido'
+          });
+        }
+      
+      // Atualizar o estado local com os usuários bloqueados
+      setUser(prev => ({ ...prev, blockedUsers: blockedUsersInfo as BlockedUser[] }));
+      
+      // Atualizar o AsyncStorage com os dados mais recentes
+      const updatedUserData = {
+        ...currentUser,
+        blockedUsers: blockedUsersInfo
+      };
+      await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
+
+      // Mostrar o modal
+
+    } catch (error: any) {
+      console.error('Erro ao carregar usuários bloqueados:', error);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao carregar usuários bloqueados: ' + error.message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setBlockedUsersModalVisible(false);
+    }
+  };
+
+  const handleUnblockUser = (userId: string, username: string) => {
+    setCustomAlert({
+      visible: true,
+      title: `Desbloqueando usuário ${username}`,
+      message: `Tem certeza que deseja desbloquear o usuário?`,
+      buttons: [
+        { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
+        { text: 'OK', style: 'default', onPress: async () => {
+          try {
+            const userStr = await AsyncStorage.getItem('user');
+            if (!userStr) return;
+            const currentUser = JSON.parse(userStr);
+            // Atualizar no Firestore
+            const userRef = doc(firestore, 'usuarios', currentUser.uid);
+            await updateDoc(userRef, {
+              blockedUsers: arrayRemove({id: userId, username: username})
+            });
+            // Atualizar no AsyncStorage
+            const updatedBlockedUsers = (currentUser.blockedUsers || []).filter((id: BlockedUser) => id.id !== userId);
+            const updatedUserData = {
+              ...currentUser,
+              blockedUsers: updatedBlockedUsers
+            };
+            await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
+            // Atualizar o estado local
+            setUser(prev => ({
+              ...prev,
+              blockedUsers: prev.blockedUsers.filter((user: BlockedUser) => user.id !== userId)
+            }));
+            setCustomAlert({
+              visible: true,
+              title: 'Sucesso',
+              message: `Usuário ${username} foi desbloqueado com sucesso.`,
+              buttons: [
+                { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+              ]
+            });
+            fetchPostsWithPagination(true);
+          } catch (error: any) {
+            setCustomAlert({
+              visible: true,
+              title: 'Erro',
+              message: 'Erro ao desbloquear usuário: ' + error.message,
+              buttons: [
+                { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+              ]
+            });
+          }
+        } }
+      ]
+    });
+  };
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <LinearGradient
@@ -945,12 +1088,6 @@ const FastShiiiScreen = () => {
             <Text style={[styles.drawerTitle, { color: themeColors.tint }]}>Configurações</Text>
 
               <Text style={[styles.drawerSubtitle, { color: themeColors.googleButton }]}>Privacidade</Text>
-            <TouchableOpacity
-              style={[styles.drawerOption, { backgroundColor: themeColors.icon }]}
-              onPress={handleViewCommentPrivacy}>
-                <Text style={[styles.drawerOptionText, { color: themeColors.googleButton }]}>Quem pode ver meus comentários</Text>
-              <Ionicons name="chevron-forward-outline" size={24} color={themeColors.tint} />
-            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.drawerOption, { backgroundColor: themeColors.icon }]}
               onPress={handleBlockedUsers}>
@@ -1036,7 +1173,7 @@ const FastShiiiScreen = () => {
             <ActivityIndicator size="large" color={themeColors.tint} style={styles.loadingIndicator} />
           ) : (
             <FlatList
-              data={posts}
+              data={posts as unknown as FormattedPost[]}
               keyExtractor={(item) => item.id}
               renderItem={renderPost}
               contentContainerStyle={styles.postsList}
@@ -1226,6 +1363,66 @@ const FastShiiiScreen = () => {
         </TouchableOpacity>
       </Modal>
 
+      <Modal visible={blockedUsersModalVisible} transparent={true} animationType="slide">
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setBlockedUsersModalVisible(false)}
+          >
+            <TouchableOpacity
+              style={[styles.modalContent, { backgroundColor: themeColors.background }]}
+              activeOpacity={1}
+            >
+              <Text style={[styles.modalTitle, { color: themeColors.googleButton }]}>Usuários Bloqueados</Text>
+              
+              <ScrollView style={styles.blockedUsersScrollView}>
+                {Array.isArray(user?.blockedUsers) && user?.blockedUsers.length > 0 ? (
+                  user.blockedUsers.map((blockedUser: any, idx: number) => {
+                    const key = typeof blockedUser === 'object' && blockedUser.id
+                      ? blockedUser.id
+                      : typeof blockedUser === 'string'
+                        ? blockedUser
+                        : idx;
+                    const username = typeof blockedUser === 'object' && blockedUser.username
+                      ? blockedUser.username
+                      : '';
+                    return (
+                      <View key={key} style={[styles.blockedUserItem, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+                        <View style={styles.blockedUserInfo}>
+                          <Ionicons name="person-circle-outline" size={24} color={themeColors.tint} style={styles.blockedUserIcon} />
+                          <Text style={[styles.blockedUserName, { color: themeColors.textSearch }]}>
+                            {username}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.unblockButton, { backgroundColor: themeColors.tint }]}
+                          onPress={() => handleUnblockUser(key, username)}
+                        >
+                          <Ionicons name="lock-open-outline" size={20} color="#fff" />
+                          <Text style={styles.unblockButtonText}>Desbloquear</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })
+                ) : (
+                  <View style={styles.emptyBlockedUsers}>
+                    <Ionicons name="people-outline" size={48} color={themeColors.icon} />
+                    <Text style={[styles.emptyBlockedUsersText, { color: themeColors.googleButton }]}>
+                      Nenhum usuário bloqueado
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              <TouchableOpacity
+                style={[styles.modalButton_fechar, { backgroundColor: themeColors.tint }]}
+                onPress={() => setBlockedUsersModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Fechar</Text>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
         {/* Modal de Confirmação de Bloqueio */}
         <BlockUserModal
           visible={blockConfirmModalVisible}
@@ -1714,5 +1911,59 @@ const styles = StyleSheet.create({
   moreOptionText: {
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  blockedUsersScrollView: {
+    width: '100%',
+    maxHeight: 300,
+    marginBottom: 20,
+  },
+  blockedUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  blockedUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  blockedUserIcon: {
+    marginRight: 12,
+  },
+  blockedUserName: {
+    fontSize: 16,
+    flex: 1,
+  },
+  unblockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  unblockButtonText: {
+    color: '#fff',
+    marginLeft: 4,
+    fontSize: 14,
+  },
+  emptyBlockedUsers: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyBlockedUsersText: {
+    marginTop: 12,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  modalButton_fechar: {
+    padding: 15,
+    borderRadius: 15,
+    alignItems: 'center',
+    width: '100%',
   },
 });

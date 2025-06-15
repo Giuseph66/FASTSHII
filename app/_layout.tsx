@@ -6,7 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'react-native-reanimated';
-import { Image } from 'react-native';
+import { Image, Platform } from 'react-native';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 
@@ -40,13 +40,26 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      document.title = 'FASTSHII';
+      
+    const favicon = document.querySelector("link[rel~='icon']") || document.createElement('link');
+    favicon.rel = 'icon';
+    favicon.type = 'image/png';
+    favicon.href = '/icons/fastshii_laranja.png';
+    document.head.appendChild(favicon);
+    }
+  }, []);
   if (!loaded) {
     return null;
   }
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
+      <Stack screenOptions={{
+        title: 'FASTSHII',
+      }}>
         <Stack.Screen 
           name="login" 
           options={{ 

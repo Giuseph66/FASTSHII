@@ -3,24 +3,27 @@ import {
   View, 
   TextInput, 
   Text, 
-  Alert, 
   StyleSheet, 
   Image, 
   TouchableOpacity, 
   ActivityIndicator, 
   useColorScheme,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Alert,
+  Keyboard,
+  ScrollView,
+  Modal
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import translations from '@/locales/translations';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { firestore } from '@/firebaseConfig';
 import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
 // Idioma atual
 const currentLanguage = 'pt'; // Altere para 'en' para inglês
 
@@ -48,51 +51,125 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    buttons?: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsModalVisible, setTermsModalVisible] = useState(false);
+
+  React.useEffect(() => {
+    if (params?.email) setEmail(String(params.email));
+    if (params?.password) setPassword(String(params.password));
+  }, [params]);
 
   const handleEmailChange = (text: string) => setEmail(text);
   const handlePasswordChange = (text: string) => setPassword(text);
   const handleConfirmPasswordChange = (text: string) => setConfirmPassword(text);
 
   const handleRegister = async () => {
-    const normalizedEmail = email.toLowerCase();
-
-    if (!normalizedEmail || !password || !confirmPassword) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      Alert.alert('Erro', 'As senhas não coincidem.');
-      return;
-    }
-
     setLoading(true);
-
+    const normalizedEmail = email.toLowerCase();
+    const usuario = await query(
+      collection(firestore, 'usuarios'),
+      where('email', '==', normalizedEmail)
+    );
+    const querySnapshot = await getDocs(usuario);
+    if (!querySnapshot.empty) {
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'E-mail já cadastrado.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setLoading(false);
+      return;
+    }
+    if (!normalizedEmail || !password || !confirmPassword) {
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Por favor, preencha todos os campos.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setLoading(false);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'As senhas não coincidem.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setLoading(false);
+      return;
+    }
+    if (!termsAccepted) {
+      setCustomAlert({
+        visible: true,
+        title: 'Termos de Uso',
+        message: 'Você precisa aceitar os Termos de Uso para se cadastrar.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setLoading(false);
+      return;
+    }
     try {
-      console.log('Iniciando cadastro...');
       const randomUsername = generateRandomUsername();
-
       const usuario = {
         user: randomUsername,
         email: normalizedEmail,
         password: password,
       };
-
       const docRef = await addDoc(collection(firestore, 'usuarios'), usuario);
-      Alert.alert('Sucesso', `Usuário cadastrado com sucesso! Nome de usuário: ${randomUsername}`);
-      console.log('Usuário salvo com ID:', docRef.id);
-      router.push('/login');
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: `Usuário cadastrado com sucesso! Nome de usuário: ${randomUsername}`,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => {
+              setCustomAlert(prev => ({ ...prev, visible: false }));
+              router.push({ pathname: '/login', params: { email: normalizedEmail, password: password } });
+            }
+          }
+        ]
+      });
     } catch (error: any) {
-      console.error('Erro ao salvar usuário:', error);
-      Alert.alert('Erro', 'Erro ao salvar usuário: ' + error.message);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao salvar usuário: ' + error.message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleSignUp = async () => {
-    Alert.alert('Atenção', 'Login em desenvolvimento, por favor, utilize o login com e-mail e senha.');
+    setCustomAlert({
+      visible: true,
+      title: 'Atenção',
+      message: 'Login em desenvolvimento, por favor, utilize o login com e-mail e senha.',
+      buttons: [
+        { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+      ]
+    });
     return;
     try {
       const auth = getAuth();
@@ -108,14 +185,41 @@ export default function RegisterScreen() {
         googleId: user.uid,
       });
 
-      Alert.alert('Sucesso', `Usuário autenticado com Google: ${randomUsername}`);
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: `Usuário autenticado com Google: ${randomUsername}`,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       router.push('/login');
     } catch (error: any) {
       console.error('Erro ao autenticar com Google:', error);
-      Alert.alert('Erro', 'Erro ao autenticar com Google: ' + error.message);
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Erro ao autenticar com Google: ' + error.message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
+  const register = () => {
+    Keyboard.dismiss();
+    setTimeout(() => {
+      handleRegister();
+    }, 200);
+  }
+
+  const login = () => {
+    Keyboard.dismiss();
+    setTimeout(() => {
+      router.push('/login');
+    }, 200);
+  }
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -125,100 +229,178 @@ export default function RegisterScreen() {
         colors={[themeColors.background, themeColors.background]}
         style={styles.gradient}
       >
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('@/assets/icons/aguiaa.png')} 
-            style={[styles.logo, { tintColor: themeColors.tint }]} 
-          />
-        </View>
-
-        <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
-            <TextInput
-              placeholder={translations[currentLanguage].register.email_placeholder}
-              value={email}
-              onChangeText={handleEmailChange}
-              style={[styles.input, { color: themeColors.text }]}
-              keyboardType="email-address"
-              placeholderTextColor={themeColors.icon}
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('@/assets/icons/aguiaa.png')} 
+              style={[styles.logo, { tintColor: themeColors.tint }]} 
             />
           </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
-            <TextInput
-              placeholder={translations[currentLanguage].register.password_placeholder}
-              value={password}
-              onChangeText={handlePasswordChange}
-              style={[styles.input, { color: themeColors.text }]}
-              secureTextEntry={!showPassword}
-              placeholderTextColor={themeColors.icon}
-            />
-            <TouchableOpacity 
-              onPress={() => setShowPassword(!showPassword)}
-              style={styles.eyeIcon}
-            >
-              <Ionicons 
-                name={showPassword ? "eye-off-outline" : "eye-outline"} 
-                size={24} 
-                color={themeColors.tint} 
+          <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>
+            <Text style={[styles.label, { color: themeColors.textSearch }]}>E-mail</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="mail-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+              <TextInput
+                placeholder={translations[currentLanguage].register.email_placeholder}
+                value={email}
+                onChangeText={handleEmailChange}
+                style={[styles.input, { color: themeColors.text }]}
+                keyboardType="email-address"
+                placeholderTextColor={themeColors.icon}
+                autoCapitalize="none"
+                autoComplete="email"
+                textContentType="emailAddress"
               />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
-            <TextInput
-              placeholder="Confirmar senha"
-              value={confirmPassword}
-              onChangeText={handleConfirmPasswordChange}
-              style={[styles.input, { color: themeColors.text }]}
-              secureTextEntry={!showConfirmPassword}
-              placeholderTextColor={themeColors.icon}
-            />
-            <TouchableOpacity 
-              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-              style={styles.eyeIcon}
-            >
-              <Ionicons 
-                name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} 
-                size={24} 
-                color={themeColors.tint} 
+            </View>
+            <Text style={[styles.label, { color: themeColors.textSearch }]}>Senha</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+              <TextInput
+                placeholder={translations[currentLanguage].register.password_placeholder}
+                value={password}
+                onChangeText={handlePasswordChange}
+                style={[styles.input, { color: themeColors.text }]}
+                secureTextEntry={!showPassword}
+                placeholderTextColor={themeColors.icon}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                textContentType="newPassword"
               />
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <ActivityIndicator size="large" color={themeColors.tint} style={styles.loadingIndicator} />
-          ) : (
-            <TouchableOpacity
-              style={[styles.registerButton, { backgroundColor: themeColors.tint }]}
-              onPress={handleRegister}
-            >
-              <Text style={styles.registerButtonText}>
-                {translations[currentLanguage].register.register_button}
+              <TouchableOpacity 
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeIcon}
+                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                <Ionicons 
+                  name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                  size={24} 
+                  color={themeColors.tint} 
+                />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.label, { color: themeColors.textSearch }]}>Confirmar senha</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={24} color={themeColors.tint} style={styles.inputIcon} />
+              <TextInput
+                placeholder="Confirmar senha"
+                value={confirmPassword}
+                onChangeText={handleConfirmPasswordChange}
+                style={[styles.input, { color: themeColors.text }]}
+                secureTextEntry={!showConfirmPassword}
+                placeholderTextColor={themeColors.icon}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                textContentType="newPassword"
+              />
+              <TouchableOpacity 
+                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                style={styles.eyeIcon}
+                accessibilityLabel={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
+              >
+                <Ionicons 
+                  name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} 
+                  size={24} 
+                  color={themeColors.tint} 
+                />
+              </TouchableOpacity>
+            </View>
+            {/* Termos de Uso */}
+            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 16 }} onPress={() => {
+                setTermsAccepted(!termsAccepted);
+                setTermsModalVisible(true);
+              }
+            }>
+              <View style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                borderWidth: 2,
+                borderColor: termsAccepted ? themeColors.tint : '#ccc',
+                backgroundColor: termsAccepted ? themeColors.tint : 'transparent',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginRight: 12,
+              }}>
+                {termsAccepted && <Ionicons name="checkmark" size={18} color="#fff" />}
+              </View>
+              <Text style={{ flex: 1, color: themeColors.textSearch, fontSize: 14 }}>
+                Li e aceito os <Text style={{ color: themeColors.tint, textDecorationLine: 'underline' , fontWeight: 'bold' }} onPress={() => setTermsModalVisible(true)}>Termos de Uso</Text>
               </Text>
             </TouchableOpacity>
-          )}
+            {/* Modal dos Termos de Uso */}
+            <Modal
+              visible={termsModalVisible}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setTermsModalVisible(false)}
+            >
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, width: '90%', maxHeight: '85%' }}>
+                  <TouchableOpacity style={{ position: 'absolute', top: 10, right: 10, zIndex: 2 }} onPress={() => setTermsModalVisible(false)}>
+                    <Ionicons name="close" size={24} color={'#000'} />
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 10, color: '#222', textAlign: 'center' }}>Termos de Uso</Text>
+                  <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 20 }}>
+                    <Text style={{ fontSize: 16, color: '#222', marginBottom: 12 }}>
+                      1. Aceitação dos Termos{"\n"}
+                      Ao criar uma conta, o usuário declara ter lido, compreendido e aceitado integralmente estes Termos de Uso. O uso contínuo da plataforma após atualizações será considerado nova aceitação automática.{"\n\n"}
+                      2. Cadastro e Responsabilidade{"\n"}
+                      O usuário compromete-se a fornecer informações verdadeiras, completas e atualizadas no momento do cadastro, sendo responsável por manter a confidencialidade de suas credenciais e não compartilhá-las com terceiros.{"\n\n"}
+                      3. Privacidade e Dados Pessoais{"\n"}
+                      A plataforma coleta e utiliza dados pessoais conforme descrito em sua Política de Privacidade, visando personalizar a experiência, garantir a segurança e cumprir obrigações legais.{"\n\n"}
+                      4. Uso Aceitável{"\n"}
+                      O usuário compromete-se a utilizar a plataforma de forma ética, legal e respeitosa, abstendo-se de publicar conteúdos ofensivos, falsos, discriminatórios ou que violem direitos de terceiros ou a legislação vigente.{"\n\n"}
+                      5. Propriedade Intelectual{"\n"}
+                      Todos os direitos sobre marca, nome, layout, códigos e demais elementos da plataforma pertencem à empresa. O conteúdo gerado pelo usuário poderá ser utilizado para fins internos, respeitando a Política de Privacidade.{"\n\n"}
+                      6. Modificações no Serviço{"\n"}
+                      A plataforma poderá alterar, suspender ou descontinuar funcionalidades a qualquer momento, sem aviso prévio, desde que não haja prejuízo direto a direitos adquiridos.{"\n\n"}
+                      7. Limitação de Responsabilidade{"\n"}
+                      A plataforma não se responsabiliza por perdas, danos diretos ou indiretos decorrentes do uso, falhas técnicas, indisponibilidades temporárias ou mau uso por parte do usuário.{"\n\n"}
+                      8. Exclusão de Conta{"\n"}
+                      O usuário pode solicitar a exclusão de sua conta a qualquer momento, ciente de que alguns dados poderão ser mantidos para cumprimento de obrigações legais.{"\n\n"}
+                      9. Foro e Resolução de Conflitos{"\n"}
+                      Fica eleito o foro da comarca de São Paulo – SP para dirimir quaisquer dúvidas ou conflitos oriundos destes termos, com renúncia expressa a qualquer outro foro.
+                    </Text>
+                  </ScrollView>
+                </View>
+              </View>
+            </Modal>
+            {loading ? (
+              <ActivityIndicator size="large" color={themeColors.tint} style={styles.loadingIndicator} />
+            ) : (
+              <TouchableOpacity
+                style={[styles.registerButton, { backgroundColor: themeColors.tint }]}
+                onPress={register}
+              >
+                <Text style={styles.registerButtonText}>
+                  {translations[currentLanguage].register.register_button}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {/*
+            <TouchableOpacity 
+              style={[styles.googleButton, { backgroundColor: themeColors.background }]}
+              onPress={handleGoogleSignUp}
+            >
+              <Image source={require('@/assets/icons/google.png')} style={styles.googleIcon} />
+              <Text style={[styles.googleButtonText, { color: themeColors.googleButton }]}>
+                Cadastrar com Google
+              </Text>
+            </TouchableOpacity>*/}
 
-          <TouchableOpacity 
-            style={[styles.googleButton, { backgroundColor: themeColors.background }]}
-            onPress={handleGoogleSignUp}
-          >
-            <Image source={require('@/assets/icons/google.png')} style={styles.googleIcon} />
-            <Text style={[styles.googleButtonText, { color: themeColors.googleButton }]}>
-              Cadastrar com Google
-            </Text>
-          </TouchableOpacity>
-
-          <Link href="/login" style={styles.loginLink}>
-            <Text style={[styles.loginLinkText, { color: themeColors.tint }]}>
-              {translations[currentLanguage].register.login_link}
-            </Text>
-          </Link>
-        </View>
+            <TouchableOpacity onPress={login} style={styles.loginLink}>
+              <Text style={[styles.loginLinkText, { color: themeColors.tint }]}>Já tem conta? Entrar</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </LinearGradient>
+      <CustomAlert
+        visible={customAlert.visible}
+        title={customAlert.title}
+        message={customAlert.message}
+        buttons={customAlert.buttons}
+        onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -316,5 +498,10 @@ const styles = StyleSheet.create({
   },
   loadingIndicator: {
     marginTop: 20,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
   },
 });

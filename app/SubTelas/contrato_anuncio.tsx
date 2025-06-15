@@ -9,7 +9,6 @@ import {
   useColorScheme,
   Dimensions,
   ActivityIndicator,
-  Alert,
   Platform,
   KeyboardAvoidingView,
   Image,
@@ -25,6 +24,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
 
 const windowWidth = Dimensions.get('window').width;
 
@@ -54,6 +54,12 @@ const ContratoAnuncioScreen = () => {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [newLink, setNewLink] = useState('');
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    buttons?: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
 
   const [form, setForm] = useState<ContractForm>({
     advertiserName: '',
@@ -99,7 +105,14 @@ const ContratoAnuncioScreen = () => {
       }
     } catch (error) {
       console.error('Erro ao selecionar imagem:', error);
-      Alert.alert('Erro', 'Não foi possível selecionar a imagem');
+        setCustomAlert({
+          visible: true,
+        title: 'Erro',
+        message: 'Erro ao selecionar imagem: ' + (error as Error).message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     }
   };
 
@@ -134,7 +147,14 @@ const ContratoAnuncioScreen = () => {
     try {
       const userData = await AsyncStorage.getItem('user');
       if (!userData) {
-        Alert.alert('Erro', 'Usuário não autenticado');
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Usuário não autenticado',
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
         return;
       }
 
@@ -147,11 +167,25 @@ const ContratoAnuncioScreen = () => {
       };
 
       await addDoc(collection(firestore, 'advertising_contracts'), contractData);
-      Alert.alert('Sucesso', 'Contrato enviado com sucesso!');
+      setCustomAlert({
+        visible: true,
+        title: 'Sucesso',
+        message: 'Contrato enviado com sucesso!',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       router.back();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao enviar contrato:', error);
-      Alert.alert('Erro', 'Não foi possível enviar o contrato');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível enviar o contrato: ' + (error as Error).message,
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
     } finally {
       setLoading(false);
     }
@@ -162,7 +196,14 @@ const ContratoAnuncioScreen = () => {
         !form.advertiserCNPJ || !form.adTitle || !form.adDescription || 
         !form.budget || !form.targetAudience || !form.adType || 
         !form.paymentMethod || !form.terms) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos obrigatórios');
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Por favor, preencha todos os campos obrigatórios',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
       return false;
     }
     return true;
@@ -570,7 +611,10 @@ const ContratoAnuncioScreen = () => {
             {/* Termos e Condições */}
             <TouchableOpacity
               style={styles.termsContainer}
-              onPress={() => setForm({ ...form, terms: !form.terms })}
+              onPress={() => {
+                setForm({ ...form, terms: !form.terms });
+                openModal();
+              }}
             >
               <View style={[styles.checkbox, { 
                 borderColor: colorScheme === 'dark' ? '#fff' : '#000',

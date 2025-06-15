@@ -29,6 +29,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Dimensions } from 'react-native';
 import ImageViewer from 'react-native-image-zoom-viewer';
+import CustomAlert from '@/components/CustomAlert';
+import type { CustomAlertButton } from '@/components/CustomAlert';
 
 const { height } = Dimensions.get('window');
 
@@ -69,6 +71,12 @@ const ChatScreen = () => {
   const [reactionModalVisible, setReactionModalVisible] = useState(false);
   const [reactionTargetMessageId, setReactionTargetMessageId] = useState<string>('');
   const availableReactions = ['👍', '❤️', '😂', '😮', '😢', '👎'];
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title?: string;
+    message: string;
+    buttons?: CustomAlertButton[];
+  }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -165,15 +173,15 @@ const ChatScreen = () => {
   }, [imageViewerIndex]);
 
   const handleSend = async () => {
-    console.log(envia);
     setenviar(false);
     if (!input.trim() && selectedImages.length === 0) {
       setenviar(true);
-      return};
+      return;
+    }
     if (!userName) {
       setenviar(true);
-      return
-    };
+      return;
+    }
     const mensagem = input.trim();
     const imagens = selectedImages;
     const messagesRef = collection(firestore, 'chats', String(chatId), 'messages');
@@ -196,9 +204,17 @@ const ChatScreen = () => {
           lastMessage: mensagem,
           lastMessageTime: Date.now(),
         });
-      } catch (error) {
+      } catch (error: any) {
         setInput(mensagem || '');
         setSelectedImages(imagens);
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Erro ao enviar mensagem: ' + (error?.message || error),
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
         console.error('Erro ao enviar mensagem:', error);
       }
     }
@@ -206,15 +222,47 @@ const ChatScreen = () => {
     for (const imgUri of selectedImages) {
       let base64Image = null;
       try {
-        const compressedImage = await ImageManipulator.manipulateAsync(
-          imgUri,
-          [{ resize: { width: 800 } }],
-          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        base64Image = await FileSystem.readAsStringAsync(compressedImage.uri, {
-          encoding: FileSystem.EncodingType.Base64,
+        if (Platform.OS === 'web') {
+          // Buscar base64 do asset selecionado
+          // O ImagePicker no web retorna assets com base64 se base64: true
+          // Mas seu picker não está usando base64: true, então precisamos buscar o asset correto
+          // Sugestão: usar um estado para armazenar os assets, mas aqui vamos tentar buscar via fetch
+          const compressedImage = await ImageManipulator.manipulateAsync(
+            imgUri,
+            [{ resize: { width: 800 } }],
+            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          const response = await fetch(compressedImage.uri);
+          const blob = await response.blob();
+          base64Image = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const dataUrl = reader.result as string;
+              const base64 = dataUrl.split(',')[1];
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          const compressedImage = await ImageManipulator.manipulateAsync(
+            imgUri,
+            [{ resize: { width: 800 } }],
+            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          base64Image = await FileSystem.readAsStringAsync(compressedImage.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+        }
+      } catch (error: any) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Erro ao processar a imagem: ' + (error?.message || error),
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
         });
-      } catch (error) {
         console.error('Erro ao processar a imagem:', error);
         continue;
       }
@@ -233,7 +281,15 @@ const ChatScreen = () => {
           lastMessage: '[imagem]',
           lastMessageTime: Date.now(),
         });
-      } catch (error) {
+      } catch (error: any) {
+        setCustomAlert({
+          visible: true,
+          title: 'Erro',
+          message: 'Erro ao enviar imagem: ' + (error?.message || error),
+          buttons: [
+            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+          ]
+        });
         console.error('Erro ao enviar imagem:', error);
       }
     }
@@ -289,6 +345,48 @@ const ChatScreen = () => {
     }
   };
 
+  // Função para obter layout do grid WhatsApp-like
+  function getGridLayout(count: number) {
+    if (count === 1) return { rows: 1, cols: 1 };
+    if (count === 2) return { rows: 1, cols: 2 };
+    if (count === 3) return { rows: 1, cols: 3 };
+    if (count === 4) return { rows: 2, cols: 2 };
+    if (count <= 6) return { rows: 2, cols: 3 };
+    return { rows: 3, cols: 3 };
+  }
+
+  // Função para agrupar imagens consecutivas do mesmo usuário
+  function groupImageMessages(messages: Message[]) {
+    const groups: (Message[])[] = [];
+    let currentGroup: Message[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const prev = messages[i - 1];
+      const isImage = !!msg.image && !msg.text;
+      const prevIsImage = prev && !!prev.image && !prev.text;
+      const sameUser = prev && prev.sender === msg.sender;
+      const closeInTime = prev && Math.abs(msg.timestamp - prev.timestamp) < 60000; // 60s
+      if (
+        isImage &&
+        prev &&
+        prevIsImage &&
+        sameUser &&
+        closeInTime
+      ) {
+        currentGroup.push(msg);
+      } else {
+        if (currentGroup.length > 0) groups.push(currentGroup);
+        currentGroup = isImage ? [msg] : [];
+        if (!isImage) groups.push([msg]);
+      }
+    }
+    if (currentGroup.length > 0) groups.push(currentGroup);
+    return groups;
+  }
+
+  // Novo array agrupado para renderização
+  const groupedMessages = groupImageMessages(messages);
+
   // Imagens para o ImageViewer (ordem correta)
   const imageMessages = messages.filter(m => m.image).slice().reverse();
   const imageUrls = imageMessages.map(m => ({ url: m.image! }));
@@ -327,6 +425,118 @@ const ChatScreen = () => {
   const openReactionModal = (messageId: string) => {
     setReactionTargetMessageId(messageId);
     setReactionModalVisible(true);
+  };
+
+  // Função para reagir em todos os itens do grupo
+  const handleSelectReactionGroup = async (group: Message[], reaction: string) => {
+    if (!chatId || !userName) return;
+    for (const msg of group) {
+      await handleSelectReaction(msg.id, reaction);
+    }
+  };
+
+  // Novo renderizador
+  const renderGroupedItem = ({ item }: { item: Message[] }) => {
+    if (item.length === 1) {
+      // Mensagem normal
+      return renderItem({ item: item[0] });
+    }
+    // Grupo de imagens
+    const isUser = item[0].sender === userName;
+    const maxToShow = 9;
+    const extraCount = item.length - maxToShow;
+    const imagesToShow = item.slice(0, maxToShow).reverse();
+    const gridCount = Math.min(item.length, maxToShow);
+    const { rows, cols } = getGridLayout(gridCount);
+    const cellSize = 100;
+    // Montar grid
+    let grid: (Message | null)[][] = Array.from({ length: rows }, () => Array(cols).fill(null));
+    imagesToShow.forEach((msg, idx) => {
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      grid[row][col] = msg;
+    });
+    const groupReactions = item[0].reactions || {};
+    const groupId = item.map(m => m.id).join('-');
+
+    return (
+      <View
+        style={[
+          styles.messageBubble,
+          isUser ? styles.userBubble : styles.friendBubble,
+          { padding: 4, alignItems: 'flex-end' },
+        ]}
+      >
+        <View style={{ width: cols * cellSize, height: rows * cellSize, flexDirection: 'column', flexWrap: 'nowrap' }}>
+          {grid.map((rowArr, rowIdx) => (
+            <View key={rowIdx} style={{ flexDirection: 'row', flex: 1 }}>
+              {rowArr.map((msg, colIdx) => {
+                if (!msg) return <View key={colIdx} style={{ width: cellSize, height: cellSize, margin: 2 }} />;
+                const flatIdx = rowIdx * cols + colIdx;
+                const isLast = flatIdx === maxToShow - 1 || flatIdx === imagesToShow.length - 1;
+                const showTime = isLast;
+                return (
+                  <TouchableOpacity
+                    key={msg.id}
+                    onPress={() => handleImagePress(msg.image!)}
+                    onLongPress={() => openReactionModal(msg.id)}
+                    style={{ width: cellSize, height: cellSize, borderRadius: 8, overflow: 'hidden', position: 'relative' }}
+                  >
+                    <Image
+                      source={{ uri: msg.image! }}
+                      style={{ width: '100%', height: '100%', margin: 5, borderRadius: 8 }}
+                    />
+                    {isLast && (
+                      <View
+                        style={{
+                          ...StyleSheet.absoluteFillObject,
+                          backgroundColor: 'rgba(0, 0, 0, 0.51)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Text style={{
+                          color: '#fff',
+                          fontSize: 32,
+                          fontWeight: 'bold',
+                          textShadowColor: '#000',
+                          textShadowOffset: { width: 1, height: 1 },
+                          textShadowRadius: 4,
+                        }}>
+                          +{extraCount}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+        <Text style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: 12 , marginTop: 10, marginRight: 10, marginBottom: 2}}>
+          {new Date(item[0].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' , second: '2-digit'})}
+        </Text>
+        <View style={styles.reactionsContainer}>
+          {Object.entries(groupReactions)
+            .filter(([_, users]) => Array.isArray(users) && users.length > 0)
+            .map(([reaction, users]) => {
+              const reacted = userName ? users.includes(userName) : false;
+              return (
+                <TouchableOpacity
+                  key={reaction}
+                  onPress={() => reacted ? handleSelectReactionGroup(item, reaction) : null}
+                  style={{ opacity: reacted ? 1 : 0.5 }}
+                >
+                  <Text style={[styles.reaction, { color: '#fff' }]}>
+                    {reaction} {users.length > 0 ? users.length : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+        </View>
+      </View>
+    );
   };
 
   const renderItem = ({ item }: { item: Message }) => {
@@ -407,9 +617,9 @@ const ChatScreen = () => {
 
           {/* Mensagens */}
           <FlatList
-            data={messages}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
+            data={groupedMessages}
+            renderItem={renderGroupedItem}
+            keyExtractor={item => item.map(m => m.id).join('-')}
             style={{ flex: 1 , bottom: teclado || insets.bottom + 80, zIndex : 1, marginTop:150}}
             inverted
             keyboardShouldPersistTaps="handled"
@@ -567,6 +777,15 @@ const ChatScreen = () => {
               </View>
             </TouchableOpacity>
           </Modal>
+
+          {/* CustomAlert */}
+          <CustomAlert
+            visible={customAlert.visible}
+            title={customAlert.title}
+            message={customAlert.message}
+            buttons={customAlert.buttons}
+            onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+          />
         </LinearGradient>
       </KeyboardAvoidingView>
     </SafeAreaView>
