@@ -15,6 +15,9 @@ import {
   Keyboard,
   StatusBar,
   ScrollView,
+  ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -46,7 +49,7 @@ interface Message {
 const ChatScreen = () => {
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
-  const { chatId, nomeConversa } = useLocalSearchParams();
+  const { chatId, nomeConversa, participantId, messageId, scrollToMessage } = useLocalSearchParams();
   const router = useRouter();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,6 +65,7 @@ const ChatScreen = () => {
   const [inputPadding, setInputPadding] = useState<number | null>(null);
   const [teclado, setTeclado] = useState<number>(0);
   const [envia, setenviar] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState(true);
   const insets = useSafeAreaInsets();
   const [editNameModalVisible, setEditNameModalVisible] = useState(false);
   const [newCustomName, setNewCustomName] = useState('');
@@ -77,6 +81,27 @@ const ChatScreen = () => {
     message: string;
     buttons?: CustomAlertButton[];
   }>({ visible: false, title: '', message: '', buttons: [{ text: 'OK' }] });
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showImageViewer, setShowImageViewer] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showCustomAlert, setShowCustomAlert] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    title: string;
+    message: string;
+    buttons: { text: string; onPress: () => void }[];
+  }>({
+    title: '',
+    message: '',
+    buttons: [{ text: 'OK', onPress: () => setShowCustomAlert(false) }],
+  });
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -134,6 +159,7 @@ const ChatScreen = () => {
     if (!chatId) return;
     const messagesRef = collection(firestore, 'chats', String(chatId), 'messages');
     const q = query(messagesRef, orderBy('timestamp', 'desc'));
+    setIsLoading(true);
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedMessages = snapshot.docs.map((doc) => {
         const data = doc.data();
@@ -144,6 +170,7 @@ const ChatScreen = () => {
         } as Message;
       });
       setMessages(fetchedMessages);
+      setIsLoading(false);
     });
     return () => unsubscribe();
   }, [chatId]);
@@ -171,6 +198,74 @@ const ChatScreen = () => {
       });
     }
   }, [imageViewerIndex]);
+
+  useEffect(() => {
+    if (isLoading) {
+      Animated.parallel([
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.2,
+              duration: 1000,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 1000,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+          ])
+        ),
+        Animated.loop(
+          Animated.timing(rotateAnim, {
+            toValue: 1,
+            duration: 2000,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          })
+        ),
+      ]).start();
+    }
+  }, [isLoading]);
+
+  useEffect(() => {
+    if (scrollToMessage && messageId && messages.length > 0) {
+      const messageIndex = messages.findIndex(msg => msg.id === messageId);
+      if (messageIndex !== -1) {
+        setTimeout(() => {
+          try {
+            flatListRef.current?.scrollToIndex({
+              index: messageIndex - 24,
+              animated: true,
+              viewPosition: 0.5
+            });
+          } catch (error) {
+            // Se falhar o scroll direto, tenta scroll para o item mais próximo
+            const safeIndex = Math.min(Math.max(0, messageIndex), messages.length - 1);
+            flatListRef.current?.scrollToIndex({
+              index: safeIndex,
+              animated: true,
+              viewPosition: 0.5
+            });
+          }
+        }, 1000); // Aumentado o delay para garantir que a lista esteja completamente renderizada
+      }
+    }
+  }, [scrollToMessage, messageId, messages]);
+
+  // Adicionar getItemLayout para melhorar a performance do scroll
+  const getItemLayout = (data: any, index: number) => ({
+    length: 100, // altura aproximada de cada item
+    offset: 100 * index,
+    index,
+  });
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const handleSend = async () => {
     setenviar(false);
@@ -390,7 +485,6 @@ const ChatScreen = () => {
   // Imagens para o ImageViewer (ordem correta)
   const imageMessages = messages.filter(m => m.image).slice().reverse();
   const imageUrls = imageMessages.map(m => ({ url: m.image! }));
-
   const handleImagePress = (clickedImage: string) => {
     const index = imageMessages.findIndex(m => m.image === clickedImage);
     setImageViewerIndex(index);
@@ -504,7 +598,7 @@ const ChatScreen = () => {
                           textShadowOffset: { width: 1, height: 1 },
                           textShadowRadius: 4,
                         }}>
-                          +{extraCount}
+                          {extraCount > 0 ? `+${extraCount}` : ''}
                         </Text>
                       </View>
                     )}
@@ -591,7 +685,15 @@ const ChatScreen = () => {
       </View>
     );
   };
-
+  const perfil = () => {
+    const otherParticipant = participants.find(p => p !== userName);
+    if (otherParticipant) {
+      router.push({
+        pathname: '/SubTelas/contactProfile',
+        params: { chatId, participantId: otherParticipant }
+      });
+    }
+  }
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }}>
       <KeyboardAvoidingView
@@ -606,24 +708,50 @@ const ChatScreen = () => {
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={[styles.chatTitle, { color: '#FFFFFF' }]}>{headerName}</Text>
-            <TouchableOpacity style={styles.moreButton} onPress={() => {
-              setEditNameModalVisible(true);
-              setNewCustomName(headerName);
-            }}>
+            <TouchableOpacity onPress={() => perfil()}>
+              <Text style={[styles.chatTitle, { color: '#FFFFFF' }]}>{headerName}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.moreButton} onPress={() => setOptionsModalVisible(true)}>
               <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
 
           {/* Mensagens */}
-          <FlatList
-            data={groupedMessages}
-            renderItem={renderGroupedItem}
-            keyExtractor={item => item.map(m => m.id).join('-')}
-            style={{ flex: 1 , bottom: teclado || insets.bottom + 80, zIndex : 1, marginTop:150}}
-            inverted
-            keyboardShouldPersistTaps="handled"
-          />
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <Animated.View
+                style={[
+                  styles.loadingCircle,
+                  {
+                    transform: [
+                      { scale: pulseAnim },
+                      { rotate: spin }
+                    ],
+                    backgroundColor: themeColors.tint,
+                  },
+                ]}
+              >
+                <Ionicons name="chatbubble-ellipses" size={40} color="#fff" />
+              </Animated.View>
+              <Text style={[styles.loadingText, { color: themeColors.textSearch }]}>
+                Carregando mensagens...
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={groupedMessages}
+              renderItem={renderGroupedItem}
+              keyExtractor={item => item.map(m => m.id).join('-')}
+              style={{ flex: 1 , bottom: teclado || insets.bottom + 80, zIndex : 1, marginTop:150}}
+              inverted
+              keyboardShouldPersistTaps="handled"
+              ref={flatListRef}
+              getItemLayout={getItemLayout}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+            />
+          )}
 
           {/* Input fixo */}
           <View style={[styles.inputContainer, {bottom: inputPadding || insets.bottom , backgroundColor: themeColors.backgroundfraco}]}>
@@ -778,6 +906,46 @@ const ChatScreen = () => {
             </TouchableOpacity>
           </Modal>
 
+          {/* Modal de opções */}
+          <Modal visible={optionsModalVisible} transparent animationType="fade">
+            <TouchableOpacity
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+              activeOpacity={1}
+              onPress={() => setOptionsModalVisible(false)}
+            >
+              <View style={[styles.optionsContainer, { backgroundColor: themeColors.background }]}>
+                <TouchableOpacity
+                  style={[styles.optionItem, { backgroundColor: themeColors.backgroundfraco , borderColor: themeColors.backgroundfundoemoji, borderWidth: 1 , borderRadius: 10 }]}
+                  onPress={() => {
+                    setOptionsModalVisible(false);
+                    const otherParticipant = participants.find(p => p !== userName);
+                    if (otherParticipant) {
+                      router.push({
+                        pathname: '/SubTelas/contactProfile',
+                        params: { chatId, participantId: otherParticipant }
+                      });
+                    }
+                  }}
+                >
+                  <Ionicons name="person-outline" size={24} color={themeColors.tint} style={{ marginRight: 10 , marginLeft: 10}} />
+                  <Text style={[styles.optionText, { color: themeColors.textSearch }]}>Ver perfil</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.optionItem, { backgroundColor: themeColors.backgroundfraco , borderColor: themeColors.backgroundfundoemoji, borderWidth: 1 , borderRadius: 10 }]}
+                  onPress={() => {
+                    setOptionsModalVisible(false);
+                    setEditNameModalVisible(true);
+                    setNewCustomName(headerName);
+                  }}
+                >
+                  <Ionicons name="pencil-outline" size={24} color={themeColors.tint} style={{ marginRight: 10 , marginLeft: 10}} />
+                  <Text style={[styles.optionText, { color: themeColors.textSearch }]}>Editar nome</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+
           {/* CustomAlert */}
           <CustomAlert
             visible={customAlert.visible}
@@ -807,7 +975,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 15,
     borderRadius: 20,
-    marginTop: 60,
+    marginTop: StatusBar.currentHeight,
     margin: 10,
     shadowColor: '#000',
     shadowOffset: {
@@ -925,5 +1093,54 @@ const styles = StyleSheet.create({
     width: '90%',
     height: '70%',
     resizeMode: 'contain',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 150,
+  },
+  loadingCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  loadingText: {
+    marginTop: 20,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  optionsContainer: {
+    width: '80%',
+    borderRadius: 15,
+    padding: 20,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    gap: 10,
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+  },
+  optionText: {
+    marginLeft: 15,
+    fontSize: 16,
   },
 });

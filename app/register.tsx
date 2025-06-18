@@ -24,6 +24,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { Colors } from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
 import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
+import { termosDeUso } from '@/contextos/termos';
 // Idioma atual
 const currentLanguage = 'pt'; // Altere para 'en' para inglês
 
@@ -40,6 +41,9 @@ function generateRandomUsername() {
 
   return `User_${diagrama}`;
 }
+
+// Regex simples para validar formato de e-mail
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterScreen() {
   const colorScheme = useColorScheme();
@@ -96,6 +100,18 @@ export default function RegisterScreen() {
         visible: true,
         title: 'Erro',
         message: 'Por favor, preencha todos os campos.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      setLoading(false);
+      return;
+    }
+    if (!emailRegex.test(normalizedEmail)) {
+      setCustomAlert({
+        visible: true,
+        title: 'E-mail inválido',
+        message: 'Por favor, insira um endereço de e-mail válido.',
         buttons: [
           { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
         ]
@@ -333,6 +349,7 @@ export default function RegisterScreen() {
               transparent
               animationType="fade"
               onRequestClose={() => setTermsModalVisible(false)}
+              style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' , margin:100}}
             >
               <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
                 <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, width: '90%', maxHeight: '85%' }}>
@@ -342,24 +359,7 @@ export default function RegisterScreen() {
                   <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 10, color: '#222', textAlign: 'center' }}>Termos de Uso</Text>
                   <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 20 }}>
                     <Text style={{ fontSize: 16, color: '#222', marginBottom: 12 }}>
-                      1. Aceitação dos Termos{"\n"}
-                      Ao criar uma conta, o usuário declara ter lido, compreendido e aceitado integralmente estes Termos de Uso. O uso contínuo da plataforma após atualizações será considerado nova aceitação automática.{"\n\n"}
-                      2. Cadastro e Responsabilidade{"\n"}
-                      O usuário compromete-se a fornecer informações verdadeiras, completas e atualizadas no momento do cadastro, sendo responsável por manter a confidencialidade de suas credenciais e não compartilhá-las com terceiros.{"\n\n"}
-                      3. Privacidade e Dados Pessoais{"\n"}
-                      A plataforma coleta e utiliza dados pessoais conforme descrito em sua Política de Privacidade, visando personalizar a experiência, garantir a segurança e cumprir obrigações legais.{"\n\n"}
-                      4. Uso Aceitável{"\n"}
-                      O usuário compromete-se a utilizar a plataforma de forma ética, legal e respeitosa, abstendo-se de publicar conteúdos ofensivos, falsos, discriminatórios ou que violem direitos de terceiros ou a legislação vigente.{"\n\n"}
-                      5. Propriedade Intelectual{"\n"}
-                      Todos os direitos sobre marca, nome, layout, códigos e demais elementos da plataforma pertencem à empresa. O conteúdo gerado pelo usuário poderá ser utilizado para fins internos, respeitando a Política de Privacidade.{"\n\n"}
-                      6. Modificações no Serviço{"\n"}
-                      A plataforma poderá alterar, suspender ou descontinuar funcionalidades a qualquer momento, sem aviso prévio, desde que não haja prejuízo direto a direitos adquiridos.{"\n\n"}
-                      7. Limitação de Responsabilidade{"\n"}
-                      A plataforma não se responsabiliza por perdas, danos diretos ou indiretos decorrentes do uso, falhas técnicas, indisponibilidades temporárias ou mau uso por parte do usuário.{"\n\n"}
-                      8. Exclusão de Conta{"\n"}
-                      O usuário pode solicitar a exclusão de sua conta a qualquer momento, ciente de que alguns dados poderão ser mantidos para cumprimento de obrigações legais.{"\n\n"}
-                      9. Foro e Resolução de Conflitos{"\n"}
-                      Fica eleito o foro da comarca de São Paulo – SP para dirimir quaisquer dúvidas ou conflitos oriundos destes termos, com renúncia expressa a qualquer outro foro.
+                      {termosDeUso}
                     </Text>
                   </ScrollView>
                 </View>

@@ -16,8 +16,6 @@ import {
   Dimensions,
   Platform,
   StatusBar,
-  Alert,
-  Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { firestore } from '@/firebaseConfig';
-import { collection, addDoc, doc, updateDoc, setDoc, arrayUnion, arrayRemove, query, orderBy, getDocs, where, limit, startAfter, getDoc, onSnapshot, increment } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, arrayUnion, arrayRemove, query, orderBy, getDocs, limit, startAfter, getDoc } from 'firebase/firestore';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { fetchUsers, fetchImages, fetchPosts } from '@/utils/firebaseQueries';
@@ -37,7 +35,6 @@ import { Background } from '@react-navigation/elements';
 import { ThemeContext } from '@react-navigation/native';
 import BlockUserModal from '@/components/BlockUserModal';
 import CustomAlert from '@/components/CustomAlert';
-import ImageViewer from 'react-native-image-zoom-viewer';
 
 interface Comment {
   userId: string;
@@ -57,9 +54,8 @@ interface Post {
   timestamp: number;
   likes: Record<string, boolean>;
   comments: Record<string, Comment>;
-  images?: string[]; // novo – várias imagens em Base64
-  imageBase64?: string | null; // legado (primeira imagem)
-  base64?: string | null;      // legado
+  imageBase64: string | null;
+  base64: string | null;
 }
 
 interface BlockedUser {
@@ -72,8 +68,6 @@ interface User {
   email: string;
   username: string;
   blockedUsers: BlockedUser[];
-  // Campo que indica tipo de conta ("N" = conta gratuita)
-  conta?: string;
 }
 
 interface CachedImage {
@@ -101,11 +95,8 @@ interface FormattedPost {
   content: string;
   likes: Record<string, boolean>;
   comments: Record<string, Comment>;
-  images: string[];
-  imageBase64?: string | null; // legado
+  imageBase64: string | null;
   timestamp: number;
-  ad?: boolean;
-  adLinks?: string[];
 }
 
 interface PaginationState {
@@ -129,9 +120,6 @@ interface MentionSuggestion {
 const CACHE_KEY = 'cached_images';
 const CACHE_DURATION = 3 * 24 * 60 * 60 * 1000; // 3 dias em milissegundos
 
-// Chave local para armazenar visualizações de anúncios por usuário
-const AD_VIEWS_KEY = 'ad_views';
-
 const windowWidth = Dimensions.get('window').width;
 const windowHeight = Dimensions.get('window').height;
 const screenWidth = Dimensions.get('screen').width;
@@ -143,55 +131,6 @@ const posheight = windowHeight / 4;
 const aspectRatio = 1; // Proporção quadrada
 
 const MAX_COMMENT_CHARS = 120;
-
-// Máximo permitido pelo Firestore para documentos é 1MB (1.048.576 bytes).
-const MAX_FIRESTORE_DOC_BYTES = 1048576;
-
-/**
- * Comprime a imagem até que o tamanho em bytes do Base64 esteja abaixo do limite especificado.
- * A cada iteração reduz a qualidade e a largura em ~10 %.
- * Retorna a string Base64 resultante.
- */
-const compressImageToLimit = async (
-  uri: string,
-  maxBytes: number = MAX_FIRESTORE_DOC_BYTES,
-  minQuality: number = 0.2
-): Promise<string> => {
-  // Função auxiliar para estimar bytes a partir do Base64 (aprox. 4/3 de expansão)
-  const base64ToBytes = (b64: string) => Math.round((b64.length * 3) / 4);
-
-  let quality = 0.8; // ponto de partida
-  let resizeWidth = 1000; // redimensionamento inicial
-
-  // Primeira tentativa (evita compressão desnecessária caso já esteja pequena)
-  let result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: resizeWidth } }],
-    { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-  );
-
-  // Loop enquanto a imagem continuar maior que o permitido e ainda podemos reduzir qualidade
-  while (
-    result.base64 &&
-    base64ToBytes(result.base64) > maxBytes &&
-    quality > minQuality
-  ) {
-    quality = Math.max(quality - 0.1, minQuality);
-    resizeWidth = Math.floor(resizeWidth * 0.9);
-
-    result = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: resizeWidth } }],
-      { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-    );
-  }
-
-  if (!result.base64) {
-    throw new Error('Falha ao converter imagem em Base64');
-  }
-
-  return result.base64;
-};
 
 const CommentWithReadMore = ({ comment, themeColors, onLike, isLiked, likesCount, disabled }: { 
   comment: Comment, 
@@ -238,9 +177,6 @@ const FastShiiiScreen = () => {
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-  // alias para evitar lint de uso de styles antes da declaração
-  const st = styles;
-
   const [posts, setPosts] = useState<Post[]>([]);
   const [postInputText, setPostInputText] = useState(''); // Input para criar post
   const [commentInputTexts, setCommentInputTexts] = useState<Record<string, string>>({}); // Inputs para comentários
@@ -248,20 +184,16 @@ const FastShiiiScreen = () => {
   const [createPostModalVisible, setCreatePostModalVisible] = useState(false);
   const [viewPostModalVisible, setViewPostModalVisible] = useState(false);
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
-  const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]); // múltiplas imagens
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [switchValue1, setSwitchValue1] = useState(true);
   const [switchValue2, setSwitchValue2] = useState(true);
   const [switchValue3, setSwitchValue3] = useState(true);
-  const [choiceChipsValue, setChoiceChipsValue] = useState<'Populares' | 'Recentes'>('Populares');
+  const [choiceChipsValue, setChoiceChipsValue] = useState('Populares');
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  // Plano:
-  // - 'N' e 'A': recursos restritos
-  // - 'C' e 'M': plano melhorado
-  const isRestricted = user?.conta === 'N' || user?.conta === 'A';
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
@@ -272,7 +204,7 @@ const FastShiiiScreen = () => {
   const [pagination, setPagination] = useState<PaginationState>({
     lastVisible: null,
     hasMore: true,
-    pageSize: Math.floor(Math.random() * (50 - 15 + 1)) + 15
+    pageSize: 10
   });
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [imagesLoaded, setImagesLoaded] = useState(false);
@@ -297,97 +229,24 @@ const FastShiiiScreen = () => {
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [likingComment, setLikingComment] = useState<string | null>(null);
-  const postListenersRef = useRef<Record<string, () => void>>({});
-  const [showFabHint, setShowFabHint] = useState(false);
-  const [searchModalVisible, setSearchModalVisible] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [searchResults, setSearchResults] = useState<FormattedPost[]>([]);
-  const [postImageIndices, setPostImageIndices] = useState<Record<string, number>>({});
-  const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const [mainIdx, setMainIdx] = useState(0);
-  const [previewImageUrls, setPreviewImageUrls] = useState<string[]>([]);
-  const [previewVisibleFeed, setPreviewVisibleFeed] = useState(false);
-  const [adViews, setAdViews] = useState<Record<string, { date: string; count: number }>>({});
-  // guard to avoid multiple increments inside same fetch pass
-  const adViewsBatchSet = useRef<Set<string>>(new Set());
-
-  // Carregar visualizações de anúncios do AsyncStorage
-  useEffect(() => {
-    const loadAdViews = async () => {
-      try {
-        const data = await AsyncStorage.getItem(AD_VIEWS_KEY);
-        if (data) {
-          setAdViews(JSON.parse(data));
-        }
-      } catch (err) {
-        console.error('Erro ao carregar ad views', err);
-      }
-    };
-    loadAdViews();
-  }, []);
-
-  const saveAdViews = async (updated: Record<string, { date: string; count: number }>) => {
-    try {
-      setAdViews(updated);
-      await AsyncStorage.setItem(AD_VIEWS_KEY, JSON.stringify(updated));
-    } catch (err) {
-      console.error('Erro ao salvar ad views', err);
-    }
-  };
-
-  // Incrementa visualizações de anúncio garantindo que o usuário esteja definido
-  const incrementAdView = (postId: string, currentUser: User | null = user) => {
-    // Caso o usuário ainda não tenha sido definido (ex.: durante o carregamento inicial)
-    if (!currentUser) return;
-    const today = new Date().toISOString().slice(0, 10);
-    setAdViews(prev => {
-      const record = prev[postId];
-      let newCount = 1;
-      if (record && record.date === today) {
-        newCount = record.count + 1;
-      }
-      const updated = { ...prev, [postId]: { date: today, count: newCount } };
-      // persist async
-      saveAdViews(updated);
-      return updated;
-    });
-
-    // Atualizar contadores globais no Firestore (total e por dia)
-    const postRef = doc(firestore, 'posts', postId);
-    const dailyField = `viewsByDate.${today}`;
-    updateDoc(postRef, {
-      viewsTotal: increment(1),
-      [dailyField]: increment(1),
-    }).catch(err => console.warn('Falha ao incrementar views:', err));
-
-    // Registrar visualização por usuário/dia em coleção dedicada
-    const viewDocId = `${postId}_${currentUser.uid}_${today}`;
-    const viewDocRef = doc(firestore, 'ad_views', viewDocId);
-    setDoc(viewDocRef, {
-      postId,
-      userId: currentUser.uid,
-      date: today,
-      count: increment(1)
-    }, { merge: true }).catch(err => console.warn('Falha ao salvar ad_views usuário:', err));
-  };
 
   useEffect(() => {
     const initializeApp = async () => {
       try {
         const storedUser = await AsyncStorage.getItem('user');
         if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          setUser(parsedUser);
-          // Definir ordenação padrão: contas gratuitas SEM ordenação popular, usar "Recentes"
-          await preloadImages();
-          await fetchPostsWithPagination(true, parsedUser?.conta === 'N' ? 'Recentes' : choiceChipsValue);
-          return; // evitar segunda chamada abaixo
+          setUser(JSON.parse(storedUser));
         } else {
           console.error('Nenhum usuário encontrado no AsyncStorage.');
           router.replace('/login');
           return;
         }
+
+        // Iniciar pré-carregamento de imagens
+        await preloadImages();
+        
+        // Buscar posts após as imagens estarem carregadas
+        await fetchPostsWithPagination(true);
       } catch (error) {
         console.error('Erro ao inicializar app:', error);
       }
@@ -397,6 +256,7 @@ const FastShiiiScreen = () => {
   }, []);
 
   const handleLogout = async () => {
+    await AsyncStorage.removeItem('user');
     setCustomAlert({
       visible: true,
       title: 'Sair da conta',
@@ -405,8 +265,6 @@ const FastShiiiScreen = () => {
         { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
         { text: 'Sair', style: 'destructive', onPress: () => {
           AsyncStorage.removeItem('user');
-          AsyncStorage.removeItem('ad_views');
-          AsyncStorage.removeItem('cache');
           router.replace('/login');
         } },
       ]
@@ -416,33 +274,12 @@ const FastShiiiScreen = () => {
   const handleImagePicker = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      // Contas gratuitas não podem selecionar várias imagens
-      allowsMultipleSelection: !isRestricted,
-      allowsEditing: false,
+      allowsEditing: true,
       quality: 0.7,
     });
 
     if (!result.canceled) {
-      const newUris = result.assets.map(a => a.uri);
-
-      if (isRestricted) {
-        if (selectedImageUris.length >= 1) {
-          // Já existe uma imagem escolhida – impedir seleção de mais
-          setCustomAlert({
-            visible: true,
-            title: 'Limite atingido',
-            message: 'Contas gratuitas podem adicionar apenas uma imagem por postagem.',
-            buttons: [
-              { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
-            ],
-          });
-          return;
-        }
-        // Garantir apenas uma imagem
-        setSelectedImageUris([newUris[0]]);
-      } else {
-        setSelectedImageUris(prev => [...prev, ...newUris]);
-      }
+      setSelectedImage(result.assets[0].uri);
     }
   };
 
@@ -469,20 +306,7 @@ const FastShiiiScreen = () => {
       try {
       const photo = await cameraRef.current.takePictureAsync();
         if (photo) {
-      // Aplicar restrição de uma única imagem para contas gratuitas
-      if (isRestricted && selectedImageUris.length >= 1) {
-        setCustomAlert({
-          visible: true,
-          title: 'Limite atingido',
-          message: 'Contas gratuitas podem adicionar apenas uma imagem por postagem.',
-          buttons: [
-            { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
-          ]
-        });
-        setCameraModalVisible(false);
-        return;
-      }
-      setSelectedImageUris(prev => [...prev, photo.uri]);
+      setSelectedImage(photo.uri);
       setCameraModalVisible(false);
         }
       } catch (error) {
@@ -512,7 +336,7 @@ const FastShiiiScreen = () => {
       return;
     }
 
-    if (!postInputText.trim() && !selectedImageUris.length) {
+    if (!postInputText.trim() && !selectedImage) {
       setCustomAlert({
         visible: true,
         title: 'Erro',
@@ -524,34 +348,57 @@ const FastShiiiScreen = () => {
       return;
     }
 
-    // Impedir mais de uma imagem para contas gratuitas
-    if (isRestricted && selectedImageUris.length > 1) {
-      setCustomAlert({
-        visible: true,
-        title: 'Limite de Imagens',
-        message: 'Sua conta permite apenas uma imagem por postagem.',
-        buttons: [
-          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
-        ],
-      });
-      return;
-    }
-
     setPosting(true);
 
     try {
-      const imagesBase64: string[] = [];
-      const perImageMax = Math.floor(MAX_FIRESTORE_DOC_BYTES / Math.max(selectedImageUris.length, 1)) - 20000; // folga
-      for (const uri of selectedImageUris) {
-        try {
-          const b64 = await compressImageToLimit(uri, perImageMax);
-          imagesBase64.push(b64);
-        } catch (err) {
-          console.error('Erro ao comprimir imagem:', err);
+      let imageBase64 = null;
+
+      if (selectedImage) {
+        let shouldCompress = false;
+
+        if (Platform.OS === 'web') {
+          // Na web, verificamos o tamanho do arquivo de uma maneira diferente
+          const response = await fetch(selectedImage);
+          const blob = await response.blob();
+          if (blob.size > 1048487) { // 1MB em bytes
+            shouldCompress = true;
+          }
+        } else {
+          // Em dispositivos móveis, usamos FileSystem
+          const fileInfo = await FileSystem.getInfoAsync(selectedImage);
+          if (fileInfo.exists && fileInfo.size && fileInfo.size > 1048487) {
+            shouldCompress = true;
+          }
+        }
+
+        let compressedImage;
+        if (shouldCompress) {
+          // Comprime e redimensiona
+          compressedImage = await ImageManipulator.manipulateAsync(
+            selectedImage,
+            [{ resize: { width: 800 } }],
+            {
+              compress: 0.5,
+              format: ImageManipulator.SaveFormat.JPEG,
+              base64: true,
+            }
+          );
+        } else {
+          // Apenas converte para base64 sem compressão extra
+          compressedImage = await ImageManipulator.manipulateAsync(
+            selectedImage,
+            [],
+            {
+              format: ImageManipulator.SaveFormat.JPEG,
+              base64: true,
+            }
+          );
+        }
+
+        if (compressedImage.base64) {
+          imageBase64 = compressedImage.base64;
         }
       }
-
-      const firstImage = imagesBase64.length > 0 ? imagesBase64[0] : null;
 
       const postData: Omit<Post, 'id'> = {
         userId: user.uid,
@@ -561,9 +408,8 @@ const FastShiiiScreen = () => {
         timestamp: Date.now(),
         likes: {},
         comments: {},
-        images: imagesBase64,
-        imageBase64: firstImage,
-        base64: firstImage,
+        imageBase64: imageBase64,
+        base64: imageBase64,
       };
 
       const postDocRef = await addDoc(collection(firestore, 'posts'), postData);
@@ -578,7 +424,7 @@ const FastShiiiScreen = () => {
         ]
       });
       setPostInputText('');
-      setSelectedImageUris([]);
+      setSelectedImage(null);
       setCreatePostModalVisible(false);
     } catch (error: any) {
       console.error('Erro ao adicionar postagem:', error);
@@ -653,18 +499,11 @@ const FastShiiiScreen = () => {
     }
   };
 
-  const fetchPostsWithPagination = async (
-    isInitialLoad: boolean = false,
-    orderChoice: 'Populares' | 'Recentes' = choiceChipsValue,
-    adViewsMap: Record<string, { date: string; count: number }> = adViews
-  ) => {
+  const fetchPostsWithPagination = async (isInitialLoad = false) => {
     if (!isInitialLoad && (!pagination.hasMore || isLoadingMore)) return;
-    setIsLoadingMore(true);
     const user = await AsyncStorage.getItem('user');
     const userData = JSON.parse(user || '{}');
     setUser(userData as User)
-    const isRestrictedLocal = userData?.conta === 'N' || userData?.conta === 'A';
-    const disableAds = userData?.conta === 'A' || userData?.conta === 'C';
     console.log(userData?.blockedUsers)
     try {
       const postsRef = collection(firestore, 'posts');
@@ -724,169 +563,39 @@ const FastShiiiScreen = () => {
           content: post.text,
           likes: post.likes || {},
           comments: post.comments || {},
-          images: post.images || [],
-          imageBase64: post.imageBase64,
+          imageBase64: post.imageBase64 || null,
           timestamp: post.timestamp,
-          ad: (post as any).ad || false,
-          adLinks: (post as any).adLinks || [],
-          dailyLimit: (post as any).dailyLimit || 5,
-          adEndDate: (post as any).adEndDate || null,
-          adStartDate: (post as any).adStartDate || null,
-          visualizacoes_max_diarias: (post as any).visualizacoes_max_diarias || 30,
-          viewsTotal: (post as any).viewsTotal || 0,
-          viewsByDate: (post as any).viewsByDate || {},
-          adContractId: (post as any).adContractId || null,
-        } as FormattedPost;
+        };
       }); 
 
       let filteredPosts = formattedPosts;
-
-      // Remover anúncios se conta não deve exibir
-      if (disableAds) {
-        const removedAds = filteredPosts.filter(p => (p as any).ad);
-        if (removedAds.length > 0) {
-          removedAds.forEach(ad => {
-            console.log(`[REMOVIDO] Anúncio removido por disableAds: id=${ad.id}`);
-          });
-        }
-        filteredPosts = filteredPosts.filter(p => !(p as any).ad);
-      }
-
       const blockedUsers = Array.isArray(userData?.blockedUsers)
         ? userData.blockedUsers.map((user: BlockedUser) => user.id)
         : [];
       if (blockedUsers.length > 0) {
         console.log( "blockedUsers", blockedUsers);
-        const removedByBlock = filteredPosts.filter((post: FormattedPost) => blockedUsers.includes(post.userId));
-        if (removedByBlock.length > 0) {
-          removedByBlock.forEach(post => {
-            console.log(`[REMOVIDO] Post removido por usuário bloqueado: id=${post.id}, userId=${post.userId}`);
-          });
-        }
-        filteredPosts = filteredPosts.filter((post: FormattedPost) => !blockedUsers.includes(post.userId));
+        filteredPosts = formattedPosts.filter((post: FormattedPost) => !blockedUsers.includes(post.userId));
       }
       
-      // Processar ordem dos posts
-      let processedPosts: FormattedPost[];
-      if (isRestrictedLocal) {
-        // Contas gratuitas: ordem aleatória
-        processedPosts = [...filteredPosts].sort(() => Math.random() - 0.5);
-      } else {
-        // Premium: populares ou recentes
-        processedPosts = orderChoice === 'Populares'
-          ? filteredPosts.sort((a, b) => {
-              const aScore = (Object.keys(a.likes).length + Object.keys(a.comments).length) / 2;
-              const bScore = (Object.keys(b.likes).length + Object.keys(b.comments).length) / 2;
-              return bScore - aScore;
-            })
-          : filteredPosts.sort((a, b) => b.timestamp - a.timestamp);
-      }
-
-      // ================= Limite diário por anúncio =================
-      const today = new Date().toISOString().slice(0, 10);
-
-      processedPosts = processedPosts.filter(p => {
-        if (!(p as any).ad) return true;
-        const limite_diario = (p as any).visualizacoes_max_diarias || 30;
-        let endDateObj = parseToDate((p as any).adEndDate);
-        console.log("endDateObj", endDateObj, today , p.id);
-        if (endDateObj && endDateObj < new Date(today)) {
-          console.log(`[REMOVIDO] Anúncio id=${p.id} removido por data de término expirada (endDateObj=${endDateObj}, hoje=${today})`);
-          updateDoc(doc(firestore, 'posts', p.id), {
-            ad: false,
-          });
-          updateDoc(doc(firestore , 'advertising_contracts' , (p as any).adContractId), {
-            status: 'expired',
-          });
-          return false;
-        }
-        // Limite diário individual por anúncio (padrão 5)
-        const adLimit = (p as any).dailyLimit || 5;
-        const viewsTotal = (p as any).viewsTotal || 0;
-        const viewRec = adViewsMap[p.id];
-        if (viewRec && viewRec.date === today && viewRec.count >= adLimit || viewsTotal >= limite_diario) {
-          console.log(`[REMOVIDO] Anúncio id=${p.id} removido por atingir limite diário (viewsTotal=${viewsTotal}, limite_diario=${limite_diario}, adLimit=${adLimit}, viewRec=${JSON.stringify(viewRec)})`);
-          return false; // já atingiu o limite diário deste anúncio
-        }
-
-        // Verificar validade do anúncio
-        const now = Date.now();
-        const startDateObj = parseToDate((p as any).adStartDate);
-        endDateObj = parseToDate((p as any).adEndDate);
-        const startOk = !(p as any).adStartDate || now >= startDateObj?.getTime() || true;
-        const endOk = !(p as any).adEndDate || now <= endDateObj?.getTime() || true;
-        console.log("startOk", startOk, "endOk", endOk, "startDateObj", startDateObj, "endDateObj", endDateObj, "now", now, "p.id", p.id);
-        if (!startOk || !endOk) {
-          console.log(`[REMOVIDO] Anúncio id=${p.id} removido por fora do período de validade (startOk=${startOk}, endOk=${endOk})`);
-        }
-        return startOk && endOk;
-      });
-
-      // Reordenar para priorizar anúncios
-      const adPosts = processedPosts.filter(p=> (p as any).ad);
-
-      // ordenar ads com menor contagem hoje primeiro
-      adPosts.sort((a,b)=>{
-        const aCount = adViewsMap[a.id]?.date===today? adViewsMap[a.id].count:0;
-        const bCount = adViewsMap[b.id]?.date===today? adViewsMap[b.id].count:0;
-        return aCount - bCount;
-      });
-
-      // Manter apenas um anúncio nesta página (se existir)
-      let selectedAds: FormattedPost[] = adPosts.slice(0,5);
-
-      // Caso a página não traga nenhum novo anúncio, tentar reaproveitar um anúncio já existente no feed
-      if (selectedAds.length === 0) {
-        const existingEligibleAd = (posts as unknown as FormattedPost[])
-          .filter(p => (p as any).ad)
-          .find(p => {
-            const adLimit = (p as any).dailyLimit || 5;
-            const rec = adViewsMap[p.id];
-            return !(rec && rec.date === today && rec.count >= adLimit);
-          });
-
-        if (existingEligibleAd) {
-          selectedAds = [{ ...existingEligibleAd }];
-        }
-      }
-      console.log('userData', user);
-      console.log("selectedAds", selectedAds.length);
-      processedPosts = [...selectedAds, ...processedPosts.filter(p=> !(p as any).ad)];
-
-      // Registrar visualização de cada anúncio que ainda não bateu seu limite diário
-      processedPosts.forEach(p => {
-        if ((p as any).ad) {
-          
-          const adLimit = (p as any).dailyLimit || 5;
-          const viewRec = adViewsMap[p.id];
-          if (!viewRec || viewRec.date !== today || viewRec.count < adLimit) {
-            incrementAdView(p.id, userData as User);
-          }
-        }
-      });
+      // Ordenar posts baseado na escolha do usuário
+      const sortedPosts = choiceChipsValue === 'Populares'
+        ? filteredPosts.sort((a, b) => {
+            const aScore = (Object.keys(a.likes).length + Object.keys(a.comments).length) / 2;
+            const bScore = (Object.keys(b.likes).length + Object.keys(b.comments).length) / 2;
+            return bScore - aScore;
+          })
+        : filteredPosts.sort((a, b) => b.timestamp - a.timestamp);
 
       if (isInitialLoad) {
-        setPosts(processedPosts as unknown as Post[]);
+        setPosts(sortedPosts as unknown as Post[]);
       } else {
-        for (const post of processedPosts) {
-          console.log("post", post.ad? "ad" : "normal", post.id);
-        }
-        console.log("adicionando posts");
-        setPosts(prev => {
-          // Evitar duplicatas apenas para posts normais; anúncios podem se repetir
-          const existingNormalIds = new Set(prev.filter(prv => !(prv as any).ad).map(prv => prv.id));
-          const toAdd = processedPosts.filter(p => {
-            if ((p as any).ad) return true; // permitir repetição de anúncios
-            return !existingNormalIds.has(p.id);
-          });
-          
-          return [...prev, ...toAdd] as unknown as Post[];
-        });
+        setPosts(prev => [...prev, ...sortedPosts] as unknown as Post[]);
       }
 
       // Carregar imagens em background
       const imageIds = newPosts
-        .flatMap(post => (post.images && post.images.length ? post.images : post.imageBase64 ? [post.imageBase64] : []));
+        .filter(post => post.imageBase64)
+        .map(post => post.imageBase64 as string);
 
       if (imageIds.length > 0) {
         fetchImagesWithCache().then(cachedImages => {
@@ -897,32 +606,27 @@ const FastShiiiScreen = () => {
           if (missingImages.length > 0) {
             fetchImages().then(images => {
               missingImages.forEach(id => {
-                const image = images.find((img: any) => img.id === id);
-                if (image && (image as any).base64) {
-                  cacheImage(id, (image as any).base64);
+                const image = images.find((img: ImageData) => img.id === id);
+                if (image?.base64) {
+                  cacheImage(id, image.base64);
                 }
               });
             });
           }
         });
       }
-
-      // adicionar listeners em tempo real
-      addRealtimeListeners(processedPosts);
-      setRefreshing(false);
     } catch (error) {
       console.error('Erro ao buscar posts:', error);
     } finally {
-      setRefreshing(false);
       setIsLoadingMore(false);
     }
   };
 
-  const handleRefresh  = async () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
       try {
         const users = await fetchUsers();
-      await fetchPostsWithPagination(true, choiceChipsValue, adViews);
+      await fetchPostsWithPagination(true);
     } catch (error) {
       console.error('Erro ao recarregar os posts:', error);
     } finally {
@@ -930,17 +634,24 @@ const FastShiiiScreen = () => {
     }
   };
 
-  const handleChipSelection = async (value: 'Populares' | 'Recentes') => {
+  const handleChipSelection = async (value: string) => {
     setChoiceChipsValue(value);
     setLoading(true);
     try {
-      setPagination({ lastVisible: null, hasMore: true, pageSize: pagination.pageSize });
-      await fetchPostsWithPagination(true, value, adViews);
-    } catch (error) {
+      // Resetar a paginação
+      setPagination({
+        lastVisible: null,
+        hasMore: true,
+        pageSize: 10
+      });
+      
+      // Buscar posts novamente com a nova ordenação
+      await fetchPostsWithPagination(true);
+      } catch (error) {
       console.error('Erro ao mudar ordenação:', error);
-    } finally {
+      } finally {
       setLoading(false);
-    }
+      }
   };
 
   const handleLikePost = async (postId: string) => {
@@ -1107,18 +818,11 @@ const FastShiiiScreen = () => {
     setProfileModalVisible(true);
   };
 
-  // Componente de item de post para evitar hooks em função render
-  const PostItem: React.FC<{ item: FormattedPost }> = ({ item }) => {
+  const renderPost = ({ item }: { item: FormattedPost }) => {
     const isLiked = user?.uid ? !!item.likes[user.uid] : false;
     const likeCount = Object.keys(item.likes || {}).filter((key) => item.likes[key]).length;
     const commentCount = Object.keys(item.comments || {}).length;
 
-    return renderPostContent(item, isLiked, likeCount, commentCount);
-  };
-
-  // Função separada para renderizar UI do post (sem hooks)
-  const renderPostContent = (item: FormattedPost, isLiked: boolean, likeCount: number, commentCount: number) => {
-    const st = styles;
     return (
       <TouchableOpacity
         onPress={() => {
@@ -1128,79 +832,38 @@ const FastShiiiScreen = () => {
           });
         }}
       >
-        <View style={[st.postContainer, { backgroundColor: themeColors.background }]}>
-          <View style={st.postHeader}>
+        <View style={[styles.postContainer, { backgroundColor: themeColors.background }]}>
+          <View style={styles.postHeader}>
             <TouchableOpacity onPress={() => handleUsernamePress(item.username, item.userId)}>
-              <Text style={[st.postUsername, { color: themeColors.tint }]}>{item.username}</Text>
+              <Text style={[styles.postUsername, { color: themeColors.tint }]}>{item.username}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[st.iconButton_trez, { borderColor: themeColors.googleButton }]}
+              style={[styles.iconButton_trez, { borderColor: themeColors.googleButton }]}
               onPress={() => handleMorePress(item.username)}
             >
               <Ionicons name="ellipsis-vertical" size={20} color={themeColors.googleButton} />
             </TouchableOpacity>
           </View>
-          {item.images && item.images.length > 0 ? (
-            (() => {
-              const currentIdx = postImageIndices[item.id] ?? 0;
-              const total = item.images.length;
-              return (
-                <View style={st.imageContainer}>
-                  <Image source={{ uri: `data:image/jpeg;base64,${item.images[currentIdx]}` }} style={st.postImage} resizeMode="cover" />
-                  {total > 1 && (
-                    <>
-                      <TouchableOpacity
-                        style={st.arrowLeft}
-                        onPress={() => setPostImageIndices(prev => ({ ...prev, [item.id]: (currentIdx - 1 + total) % total }))}
-                      >
-                        <Ionicons name="chevron-back" size={24} color="#fff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={st.arrowRight}
-                        onPress={() => setPostImageIndices(prev => ({ ...prev, [item.id]: (currentIdx + 1) % total }))}
-                      >
-                        <Ionicons name="chevron-forward" size={24} color="#fff" />
-                      </TouchableOpacity>
-                      <View style={st.counterOverlaySmall}>
-                        <Text style={{ color: '#fff', fontSize: 12 }}>{currentIdx + 1}/{total}</Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-              );
-            })()
-          ) : item.imageBase64 ? (
-            <View style={st.imageContainer}>
-              <Image source={{ uri: `data:image/jpeg;base64,${item.imageBase64}` }} style={st.postImage} resizeMode="cover" />
-            </View>
-          ) : null}
-          <Text style={[st.postContent, { color: themeColors.googleButton }]}>{item.content}</Text>
-
-          {item.ad && (
-            <View style={{ marginTop: 8, alignSelf: 'flex-start', backgroundColor: themeColors.tint, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}>
-              <Text style={{ color: '#fff', fontSize: 12 }}>Anúncio</Text>
-              {item.adLinks && item.adLinks.length > 0 && (
-                <View style={{ marginTop:6 }}>
-                  {item.adLinks.map((lnk, idx) => (
-                    <TouchableOpacity key={idx} onPress={() => Linking.openURL(lnk)} style={{ flexDirection:'row', alignItems:'center', marginBottom:4 }}>
-                      <Ionicons name="link" size={16} color="#fff" />
-                      <Text
-                        style={{ color:'#fff', marginLeft:6, textDecorationLine:'underline' }}
-                        numberOfLines={1}
-                      >
-                        {lnk.replace(/https?:\/\//,'')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+          {item.imageBase64 && (
+            <View style={styles.imageContainer}>
+              <Image 
+                source={{ uri: `data:image/jpeg;base64,${item.imageBase64}` }}
+                style={styles.postImage}
+                resizeMode="cover"
+              />
+              {!imagesLoaded && (
+                <View style={styles.imagePlaceholder}>
+                  <ActivityIndicator size="large" color={themeColors.tint} />
                 </View>
               )}
             </View>
           )}
-          <View style={st.postFooter}>
-            <View style={st.postActions}>
+          <Text style={[styles.postContent, { color: themeColors.googleButton }]}>{item.content}</Text>
+          <View style={styles.postFooter}>
+            <View style={styles.postActions}>
               <TouchableOpacity
                 style={[
-                  st.iconButton,
+                  styles.iconButton,
                   { backgroundColor: isLiked ? themeColors.tint : 'transparent' },
                 ]}
                 onPress={() => handleLikePost(item.id)}
@@ -1211,16 +874,16 @@ const FastShiiiScreen = () => {
                   color={isLiked ? '#fff' : themeColors.googleButton}
                 />
               </TouchableOpacity>
-              <Text style={[st.postActionText, { color: themeColors.googleButton }]}>
+              <Text style={[styles.postActionText, { color: themeColors.googleButton }]}>
                 {likeCount}
               </Text>
               <TouchableOpacity
-                style={[st.iconButton, { borderColor: themeColors.googleButton }]}
+                style={[styles.iconButton, { borderColor: themeColors.googleButton }]}
                 onPress={() => setExpandedPostId(expandedPostId === item.id ? null : item.id)}
               >
                 <Ionicons name="chatbubble-outline" size={20} color={themeColors.googleButton} />
               </TouchableOpacity>
-              <Text style={[st.postActionText, { color: themeColors.googleButton }]}>
+              <Text style={[styles.postActionText, { color: themeColors.googleButton }]}>
                 {commentCount}
               </Text>
             </View>
@@ -1297,10 +960,10 @@ const FastShiiiScreen = () => {
 
   const Chip: React.FC<ChipProps> = ({ label, selected, onPress }) => (
     <TouchableOpacity
-      style={[st.chip, selected ? {backgroundColor: themeColors.tint } : st.chipUnselected]}
+      style={[styles.chip, selected ? {backgroundColor: themeColors.tint } : styles.chipUnselected]}
       onPress={onPress}
     >
-      <Text style={selected ? st.chipTextSelected : st.chipTextUnselected}>
+      <Text style={selected ? styles.chipTextSelected : styles.chipTextUnselected}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -1323,7 +986,6 @@ const FastShiiiScreen = () => {
   };
 
   const handleLoadMore = () => {
-    console.log("carregando mais");
     if (!isLoadingMore && pagination.hasMore) {
       fetchPostsWithPagination(false);
     }
@@ -1340,8 +1002,8 @@ const FastShiiiScreen = () => {
       // Pré-carregar imagens em paralelo
       await Promise.all(
         imagesToPreload.map(async (image) => {
-          if ((image as any).base64) {
-            await cacheImage((image as any).id, (image as any).base64);
+          if (image.base64) {
+            await cacheImage(image.id, image.base64);
           }
         })
       );
@@ -1400,7 +1062,7 @@ const FastShiiiScreen = () => {
         }
       
       // Atualizar o estado local com os usuários bloqueados
-      setUser(prev => ({ ...(prev as User), blockedUsers: blockedUsersInfo as BlockedUser[] } as User));
+      setUser(prev => ({ ...prev, blockedUsers: blockedUsersInfo as BlockedUser[] }));
       
       // Atualizar o AsyncStorage com os dados mais recentes
       const updatedUserData = {
@@ -1451,9 +1113,9 @@ const FastShiiiScreen = () => {
             await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
             // Atualizar o estado local
             setUser(prev => ({
-              ...(prev as User),
-              blockedUsers: (prev?.blockedUsers || []).filter((user: BlockedUser) => user.id !== userId)
-            } as User));
+              ...prev,
+              blockedUsers: prev.blockedUsers.filter((user: BlockedUser) => user.id !== userId)
+            }));
             setCustomAlert({
               visible: true,
               title: 'Sucesso',
@@ -1562,27 +1224,27 @@ const FastShiiiScreen = () => {
     if (!showMentions || mentionSuggestions.length === 0) return null;
 
     return (
-      <View style={[st.mentionSuggestions, { backgroundColor: themeColors.background }]}>
+      <View style={[styles.mentionSuggestions, { backgroundColor: themeColors.background }]}>
         <ScrollView style={{ maxHeight: 200 }}>
           {mentionSuggestions.map((suggestion, index) => (
             <TouchableOpacity
               key={suggestion.id}
               style={[
-                st.mentionSuggestionItem,
+                styles.mentionSuggestionItem,
                 { backgroundColor: index === selectedMentionIndex ? 'rgba(255,255,255,0.1)' : 'transparent' }
               ]}
               onPress={() => insertMention(suggestion.id, suggestion.user)}
             >
-              <View style={st.mentionSuggestionContent}>
+              <View style={styles.mentionSuggestionContent}>
                 <Image
                   source={require('@/assets/icons/aguiaa.png')}
-                  style={[st.mentionAvatar, { tintColor: themeColors.googleButton }]}
+                  style={[styles.mentionAvatar, { tintColor: themeColors.googleButton }]}
                 />
-                <View style={st.mentionUserInfo}>
-                  <Text style={[st.mentionUsername, { color: themeColors.googleButton }]}>
+                <View style={styles.mentionUserInfo}>
+                  <Text style={[styles.mentionUsername, { color: themeColors.googleButton }]}>
                     {suggestion.user}
                   </Text>
-                  <Text style={[st.mentionName, { color: themeColors.googleButton }]}>
+                  <Text style={[styles.mentionName, { color: themeColors.googleButton }]}>
                     {suggestion.username}
                   </Text>
                 </View>
@@ -1661,124 +1323,6 @@ const FastShiiiScreen = () => {
     }
   };
 
-  // Cleanup listeners on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(postListenersRef.current).forEach(unsub => unsub && unsub());
-    };
-  }, []);
-
-  // before fetchPostsWithPagination definition
-  const addRealtimeListeners = (postsArray: FormattedPost[]) => {
-    postsArray.forEach(post => {
-      if (postListenersRef.current[post.id]) return;
-      const unsub = onSnapshot(doc(firestore, 'posts', post.id), snapshot => {
-        if (!snapshot.exists()) return;
-        const data = snapshot.data();
-        setPosts(prev => prev.map(p => p.id === post.id ? { ...p, likes: data.likes || {}, comments: data.comments || {} } : p));
-      });
-      postListenersRef.current[post.id] = unsub;
-    });
-  };
-
-  // Filtrar posts quando searchText mudar
-  useEffect(() => {
-    if (!searchText.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    const queryLower = searchText.toLowerCase();
-    const results = (posts as unknown as FormattedPost[]).filter(p => {
-      if (p.content && p.content.toLowerCase().includes(queryLower)) return true;
-      if (p.comments) {
-        return Object.values(p.comments).some((c: Comment) => c.text.toLowerCase().includes(queryLower));
-      }
-      return false;
-    });
-    setSearchResults(results);
-  }, [searchText, posts]);
-
-  const handleCropMainImage = async () => {
-    if (selectedImageUris.length === 0) return;
-    const currentUri = selectedImageUris[mainIdx];
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.9,
-    });
-    if (!result.canceled) {
-      const newUri = result.assets[0].uri;
-      setSelectedImageUris(prev => prev.map((u,i)=> i===mainIdx? newUri:u));
-    }
-  };
-
-  const handleDeleteMainImage = () => {
-    if (selectedImageUris.length === 0) return;
-    setSelectedImageUris(prev => {
-      const arr = prev.filter((_,i)=> i!==mainIdx);
-      if (mainIdx >= arr.length) setMainIdx(Math.max(arr.length-1,0));
-      return arr;
-    });
-  };
-
-  // Render wrapper para FlatList
-  const renderPost = ({ item }: { item: FormattedPost }) => <PostItem item={item} />;
-
-  // Sincronizar ad_views remotos após usuário ser carregado
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const syncAdViews = async () => {
-      try {
-        const today = new Date().toISOString().slice(0, 10);
-        const q = query(
-          collection(firestore, 'ad_views'),
-          where('userId', '==', user.uid),
-          where('date', '==', today)
-        );
-        const snapshot = await getDocs(q);
-
-        const serverViews: Record<string, { date: string; count: number }> = {};
-        snapshot.forEach(docSnap => {
-          const data = docSnap.data() as any;
-          serverViews[data.postId] = { date: data.date, count: data.count || 0 };
-        });
-
-        // Merge com local, pegando o maior contador
-        const merged: Record<string, { date: string; count: number }> = { ...adViews };
-        const allIds = new Set([...Object.keys(adViews), ...Object.keys(serverViews)]);
-        for (const id of allIds) {
-          const localRec = adViews[id];
-          const serverRec = serverViews[id];
-          if (localRec && localRec.date === today && serverRec) {
-            merged[id] = { date: today, count: Math.max(localRec.count, serverRec.count) };
-          } else if (serverRec) {
-            merged[id] = serverRec;
-          }
-        }
-
-        // Atualizar AsyncStorage & state
-        await AsyncStorage.setItem(AD_VIEWS_KEY, JSON.stringify(merged));
-        setAdViews(merged);
-
-        // Se algum contador local era maior que o do servidor, atualizar Firestore
-        for (const [postId, rec] of Object.entries(merged)) {
-          const serverCount = serverViews[postId]?.count || 0;
-          if (rec.date === today && rec.count > serverCount) {
-            const viewDocRef = doc(firestore, 'ad_views', `${postId}_${user.uid}_${today}`);
-            await setDoc(viewDocRef, { count: rec.count }, { merge: true });
-          }
-        }
-      } catch (err) {
-        console.warn('Falha ao sincronizar ad_views:', err);
-      }
-    };
-
-    syncAdViews();
-    // run once per user load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid]);
-
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <LinearGradient
@@ -1796,20 +1340,6 @@ const FastShiiiScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <Modal visible={previewVisibleFeed} transparent={true} animationType="fade">
-                  <ImageViewer
-                    imageUrls={(selectedImageUris || []).map(img => ({ url: img }))}
-                    index={mainIdx}
-                    enableSwipeDown={true}
-                    onSwipeDown={() => setPreviewVisibleFeed(false)}
-                    onClick={() => setPreviewVisibleFeed(false)}
-                    renderHeader={() => (
-                      <TouchableOpacity style={styles.modalClose} onPress={() => setPreviewVisibleFeed(false)}>
-                        <Ionicons name="close" size={30} color="#fff" />
-                      </TouchableOpacity>
-                    )}
-                  />
-                </Modal>
       {/* End Drawer implementado via Modal */}
       <Modal visible={drawerVisible} animationType="slide" transparent>
         <TouchableOpacity
@@ -1867,56 +1397,36 @@ const FastShiiiScreen = () => {
 
           {/* Corpo da tela */}
           <View style={styles.body}>
-            {/* Barra de ações: pesquisa e novo post */}
-            <View style={styles.actionBar}>
-              {/* Pesquisa desabilitada para contas gratuitas */}
-              {!isRestricted && (
-                <TouchableOpacity
-                  style={[styles.searchButton, { backgroundColor: themeColors.icon }]}
-                  onPress={() => setSearchModalVisible(true)}
-                >
-                  <Ionicons name="search" size={24} color={themeColors.googleButton} />
-                </TouchableOpacity>
-              )}
-
+            {/* Campo de Input para criar post */}
+            <View style={[styles.inputContainer, { backgroundColor: themeColors.backgroundfraco }]}>
+              <TextInput
+                style={[styles.input, { color: themeColors.googleButton }]}
+                value={postInputText}
+                onChangeText={setPostInputText}
+                placeholder="Compartilhe seus pensamentos..."
+                placeholderTextColor={themeColors.textSearch}
+              />
               <TouchableOpacity
-                style={[
-                  styles.fabButton,
-                  {
-                    backgroundColor: themeColors.tint,
-                    width: showFabHint ? windowWidth - 100 : 56,
-                    paddingHorizontal: showFabHint ? 16 : 0,
-                  },
-                ]}
+                style={[styles.addButton, { backgroundColor: 'rgba(255,255,255,0.1)' }]}
                 onPress={() => setCreatePostModalVisible(true)}
-                onLongPress={() => setShowFabHint(true)}
-                onPressOut={() => setShowFabHint(false)}
-                delayLongPress={400}
               >
-                {showFabHint ? (
-                  <Text style={styles.fabHintText}>Compartilhe seus pensamentos...</Text>
-                ) : (
-                  <Ionicons name="add" size={28} color="#fff" />
-                )}
+                <Ionicons name="add" size={24} color={themeColors.googleButton} />
               </TouchableOpacity>
             </View>
 
             {/* Choice Chips */}
-            {/* Chips escondidos para contas gratuitas */}
-            {!isRestricted && (
-              <View style={[styles.chipsContainer, { marginTop: showFabHint ? '10%' : 0 }]}>
-                <Chip
-                  label="Populares"
-                  selected={choiceChipsValue === 'Populares'}
-                  onPress={() => handleChipSelection('Populares')}
-                />
-                <Chip
-                  label="Recentes"
-                  selected={choiceChipsValue === 'Recentes'}
-                  onPress={() => handleChipSelection('Recentes')}
-                />
-              </View>
-            )}
+            <View style={styles.chipsContainer}>
+              <Chip
+                label="Populares"
+                selected={choiceChipsValue === 'Populares'}
+                onPress={() => handleChipSelection('Populares')}
+              />
+              <Chip
+                label="Recentes"
+                selected={choiceChipsValue === 'Recentes'}
+                onPress={() => handleChipSelection('Recentes')}
+              />
+            </View>
 
             {/* Lista de Posts */}
           {loading ? (
@@ -1932,7 +1442,7 @@ const FastShiiiScreen = () => {
                 <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
               }
               onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.2}
+              onEndReachedThreshold={0.5}
               ListFooterComponent={() => 
                 isLoadingMore ? (
                   <ActivityIndicator size="small" color={themeColors.tint} style={styles.loadingMoreIndicator} />
@@ -1950,7 +1460,7 @@ const FastShiiiScreen = () => {
           <TouchableOpacity
             style={styles.modalOverlay}
             activeOpacity={1}
-            //onPress={() => setCreatePostModalVisible(false)}
+            onPress={() => setCreatePostModalVisible(false)}
           >
             <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
               <Text style={[styles.modalTitle, { color: themeColors.textSearch }]}>Nova Postagem</Text>
@@ -1968,37 +1478,8 @@ const FastShiiiScreen = () => {
                 placeholder="Escreva algo..."
                 placeholderTextColor={'rgba(255,255,255,0.5)'}
               />
-              {selectedImageUris.length > 0 && (
-                <>
-                  {/* Main Preview */}
-                  <View style={st.mainPreviewWrapper}>
-                    <TouchableOpacity activeOpacity={0.9} onPress={()=>{setPreviewIndex(mainIdx); setPreviewVisibleFeed(true);}} onLongPress={handleCropMainImage}>
-                      <Image source={{uri: selectedImageUris[mainIdx]}} style={st.mainPreviewImage} />
-                    </TouchableOpacity>
-                    {selectedImageUris.length>1 && (
-                      <>
-                        <TouchableOpacity style={st.arrowLeftLarge} onPress={()=> setMainIdx((mainIdx-1+selectedImageUris.length)%selectedImageUris.length)}>
-                          <Ionicons name="chevron-back" size={30} color="#fff" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={st.arrowRightLarge} onPress={()=> setMainIdx((mainIdx+1)%selectedImageUris.length)}>
-                          <Ionicons name="chevron-forward" size={30} color="#fff" />
-                        </TouchableOpacity>
-                      </>
-                    )}
-                    {/* delete */}
-                    <TouchableOpacity style={st.removeMainBtn} onPress={handleDeleteMainImage}>
-                      <Ionicons name="trash" size={22} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {/* Thumbnails */}
-                 <ScrollView horizontal style={{marginVertical:10}} showsHorizontalScrollIndicator={false}>
-                   {selectedImageUris.map((uri, idx) => (
-                     <TouchableOpacity key={idx} onPress={()=> setMainIdx(idx)}>
-                       <Image source={{ uri }} style={[st.dynamicImage,{marginRight:8, borderWidth: idx===mainIdx?2:0, borderColor: themeColors.tint}]} />
-                     </TouchableOpacity>
-                   ))}
-                 </ScrollView>
-                </>
+              {selectedImage && (
+                <Image source={{ uri: selectedImage }} style={styles.dynamicImage} />
               )}
               <View style={styles.modalButtonRow}>
                 <TouchableOpacity
@@ -2079,38 +1560,13 @@ const FastShiiiScreen = () => {
                   <Text style={[styles.modalText, { color: themeColors.googleButton }]}>
                     {selectedPost.content}
                   </Text>
-                  {selectedPost.images && selectedPost.images.length > 0 ? (
-                    (() => {
-                      const currentIdx = postImageIndices[selectedPost.id] ?? 0;
-                      const total = selectedPost.images.length;
-                      return (
-                        <View style={styles.imageContainer}>
-                          <Image source={{ uri: `data:image/jpeg;base64,${selectedPost.images[currentIdx]}` }} style={styles.postImage} resizeMode="cover" />
-                          {total > 1 && (
-                            <>
-                              <TouchableOpacity
-                                style={st.arrowLeft}
-                                onPress={() => setPostImageIndices(prev => ({ ...prev, [selectedPost.id]: (currentIdx - 1 + total) % total }))}
-                              >
-                                <Ionicons name="chevron-back" size={24} color="#fff" />
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={st.arrowRight}
-                                onPress={() => setPostImageIndices(prev => ({ ...prev, [selectedPost.id]: (currentIdx + 1) % total }))}
-                              >
-                                <Ionicons name="chevron-forward" size={24} color="#fff" />
-                              </TouchableOpacity>
-                              <View style={st.counterOverlaySmall}>
-                                <Text style={{ color: '#fff', fontSize: 12 }}>{currentIdx + 1}/{total}</Text>
-                              </View>
-                            </>
-                          )}
-                        </View>
-                      );
-                    })()
-                  ) : selectedPost.imageBase64 ? (
-                    <Image source={{ uri: `data:image/jpeg;base64,${selectedPost.imageBase64}` }} style={styles.dynamicImage} resizeMode="cover" />
-                  ) : null}
+                  {selectedPost.imageBase64 && (
+                    <Image
+                      source={{ uri: `data:image/jpeg;base64,${selectedPost.imageBase64}` }}
+                      style={styles.dynamicImage}
+                      resizeMode="cover"
+                    />
+                  )}
                   <View style={styles.modalFooter}>
                     <Text style={[styles.modalLikes, { color: themeColors.googleButton }]}>
                       Curtidas: {Object.keys(selectedPost.likes).filter((key) => selectedPost.likes[key]).length}
@@ -2242,53 +1698,6 @@ const FastShiiiScreen = () => {
         buttons={customAlert.buttons}
         onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
       />
-
-      {/* Modal de Pesquisa */}
-      <Modal visible={searchModalVisible} transparent={false} animationType="slide">
-        <View style={[styles.searchContainer, { backgroundColor: themeColors.background }]}>
-          <View style={styles.searchHeader}>
-            <TextInput
-              style={[
-                styles.searchInput,
-                {
-                  backgroundColor: 'rgba(255,255,255,0.05)',
-                  color: themeColors.googleButton,
-                  borderRadius: 8,
-                  marginRight: 8,
-                },
-              ]}
-              placeholder="Pesquisar..."
-              placeholderTextColor={themeColors.textSearch}
-              value={searchText}
-              onChangeText={setSearchText}
-              autoFocus
-            />
-            <TouchableOpacity onPress={() => { setSearchModalVisible(false); setSearchText(''); }}>
-              <Ionicons name="close" size={28} color={themeColors.googleButton} />
-            </TouchableOpacity>
-          </View>
-
-          {searchText.trim() === '' ? (
-            <Text style={{ color: themeColors.googleButton, textAlign: 'center' }}>
-              Digite algo para pesquisar em posts e comentários.
-            </Text>
-          ) : searchResults.length === 0 ? (
-            <Text style={{ color: themeColors.googleButton, textAlign: 'center' }}>
-              Nenhum resultado encontrado.
-            </Text>
-          ) : (
-            <FlatList
-              data={searchResults as unknown as FormattedPost[]}
-              keyExtractor={(item, index) => item.id ? String(item.id) + '_' + index : String(index)}
-              renderItem={renderPost}
-              showsVerticalScrollIndicator={false}
-              ItemSeparatorComponent={() => (
-                <View style={[styles.separator, { backgroundColor: 'rgba(255,255,255,0.1)' }]} />
-              )}
-            />
-          )}
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -2598,7 +2007,7 @@ const styles = StyleSheet.create({
   },
   drawerOverlay: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   drawer: {
     position: 'absolute',
@@ -2606,7 +2015,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: Math.min(windowWidth * 0.8, 380),
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#151142',
     elevation: 16,
     paddingTop: 60,
     borderTopLeftRadius: 20,
@@ -2856,130 +2265,4 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.7,
   },
-  fabWrapper: {
-    width: postWidth,
-    alignItems: 'flex-end',
-    marginTop: 20,
-    marginBottom: 16,
-  },
-  fabButton: {
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 6,
-    elevation: 8,
-    flexDirection: 'row',
-  },
-  fabHintText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actionBar: {
-    width: postWidth,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 16,
-  },
-  searchButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    padding: 12,
-  },
-  searchHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  searchContainer: {
-    flex: 1,
-    padding: 20,
-  },
-  arrowLeft: {
-    position: 'absolute',
-    top: '50%',
-    left: 10,
-    zIndex: 1000,
-    padding: 6,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  arrowRight: {
-    position: 'absolute',
-    top: '50%',
-    right: 10,
-    zIndex: 1000,
-    padding: 6,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  counterOverlaySmall: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  mainPreviewWrapper: {
-    width: postWidth,
-    height: postWidth * aspectRatio,
-    borderRadius: 10,
-    overflow: 'hidden',
-    position:'relative',
-  },
-  mainPreviewImage: {
-    width: '100%',
-    height: '100%',
-  },
-  arrowLeftLarge: {
-    position:'absolute',
-    top:'50%',
-    left:10,
-    padding:8,
-    backgroundColor:'rgba(0,0,0,0.4)',
-    borderRadius:20,
-  },
-  arrowRightLarge: {
-    position:'absolute',
-    top:'50%',
-    right:10,
-    padding:8,
-    backgroundColor:'rgba(0,0,0,0.4)',
-    borderRadius:20,
-  },
-  removeMainBtn: {
-    position:'absolute',
-    top:10,
-    right:10,
-    backgroundColor:'rgba(0,0,0,0.6)',
-    borderRadius:20,
-    padding:6,
-  },
 });
-
-function parseToDate(date: any): Date | null {
-  if (!date) return null;
-  if (typeof date === 'string') return new Date(date);
-  if (typeof date === 'object' && date.seconds) return new Date(date.seconds * 1000);
-  return null;
-}

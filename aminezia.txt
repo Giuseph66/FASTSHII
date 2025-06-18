@@ -1,0 +1,5 @@
+cloudflared tunnel run fastshii-tunel
+
+npx expo start --clear
+
+eas build -p android --profile preview --local     

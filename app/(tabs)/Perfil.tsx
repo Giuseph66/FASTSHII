@@ -11,7 +11,8 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  Dimensions
+  Dimensions,
+  StatusBar
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -145,19 +146,19 @@ const Profile15Screen = () => {
       }
 
       const userData = userDoc.data();
-      const blockedUsersIds: BlockedUser[] = userData.blockedUsers || [];
+      const blockedUsersIds: BlockedUser[] = Array.isArray(userData.blockedUsers) ? userData.blockedUsers : [];
 
       // Buscar informações dos usuários bloqueados
       const blockedUsersInfo: BlockedUser[] = [];
       for (const blockedId of blockedUsersIds) {
-          blockedUsersInfo.push({
-            id: blockedId.id,
-            username: blockedId.username || 'Usuário Desconhecido'
-          });
-        }
+        blockedUsersInfo.push({
+          id: blockedId.id,
+          username: blockedId.username || 'Usuário Desconhecido'
+        });
+      }
 
       // Atualizar o estado local com os usuários bloqueados
-      setUser(prev => ({ ...prev, blockedUsers: blockedUsersInfo }));
+      setUser(prev => prev ? { ...prev, blockedUsers: blockedUsersInfo } : { username: '', email: '', uid: '', blockedUsers: blockedUsersInfo });
       
       // Atualizar o AsyncStorage com os dados mais recentes
       const updatedUserData = {
@@ -200,16 +201,21 @@ const Profile15Screen = () => {
               blockedUsers: arrayRemove({id: userId, username: username})
             });
             // Atualizar no AsyncStorage
-            const updatedBlockedUsers = (currentUser.blockedUsers || []).filter((id: string) => id !== userId);
+            const updatedBlockedUsers = (currentUser.blockedUsers || []).filter((blk: any) => {
+              // bloco pode ser string (id) ou objeto {id, username}
+              return typeof blk === 'string' ? blk !== userId : blk.id !== userId;
+            });
             const updatedUserData = {
               ...currentUser,
               blockedUsers: updatedBlockedUsers
             };
+            console.log("updatedUserData", updatedUserData)
             await AsyncStorage.setItem('user', JSON.stringify(updatedUserData));
+
             // Atualizar o estado local
             setUser(prev => ({
               ...prev,
-              blockedUsers: prev.blockedUsers.filter((user: BlockedUser) => user.id !== userId)
+              blockedUsers: (prev.blockedUsers || []).filter((u: any) => (typeof u === 'string' ? u !== userId : u.id !== userId))
             }));
             setCustomAlert({
               visible: true,
@@ -358,7 +364,17 @@ const Profile15Screen = () => {
             <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Contrato de anúncio</Text>
             <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
           </TouchableOpacity>
-        
+          {/*tornar premium*/}
+          <TouchableOpacity
+            style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+            onPress={() => router.push({
+              pathname: '/SubTelas/conta_premium'
+            })}
+          >
+            <Ionicons name="star-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
+            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Tornar Premium</Text>
+            <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.optionCard, { backgroundColor: themeColors.background }]}
             onPress={() => router.push({
@@ -367,7 +383,19 @@ const Profile15Screen = () => {
             })}
           >
             <Ionicons name="person-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
-            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Perfil de geral</Text>
+            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Perfil Público</Text>
+            <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+            onPress={() => router.push({
+              pathname: '/SubTelas/admin_contratos',
+              params: { id: user.uid }
+            })}
+          >
+            <Ionicons name="document-text-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
+            <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Contratos</Text>
             <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
           </TouchableOpacity>
 
@@ -382,6 +410,8 @@ const Profile15Screen = () => {
                   { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert({ ...customAlert, visible: false }) },
                   { text: 'Sair', style: 'destructive', onPress: () => {
                     AsyncStorage.removeItem('user');
+                    AsyncStorage.removeItem('ad_views');
+                    AsyncStorage.removeItem('cache');
                     router.replace('/login');
                   } },
                 ]
@@ -391,6 +421,16 @@ const Profile15Screen = () => {
             <Ionicons name="log-out-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
             <Text style={[styles.logoutButtonText, { color: themeColors.tint }]}>Sair</Text>
           </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+                  onPress={() => router.push({
+                    pathname: '/SubTelas/configuracoes_admin',
+                  })}
+                >
+                  <Ionicons name="settings-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
+                  <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Configurações Admin</Text>
+                  <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
+                </TouchableOpacity>
         </ScrollView>
 
         <Modal visible={editProfileModalVisible} transparent={true} animationType="slide">
@@ -565,12 +605,12 @@ export default Profile15Screen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginTop: height * 0.05,
   },
   gradient: {
     flex: 1,
   },
   header: {
+    marginTop: StatusBar.currentHeight,
     height: 200,
     width: '100%',
     paddingTop: 40,

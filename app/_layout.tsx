@@ -109,6 +109,48 @@ export default function RootLayout() {
             animation: 'slide_from_right'
           }} 
         />
+        <Stack.Screen 
+          name="SubTelas/admin_contratos" 
+          options={{ 
+            headerShown: false,
+            animation: 'slide_from_right'
+          }} 
+          />
+          <Stack.Screen 
+            name="SubTelas/contactProfile" 
+            options={{ 
+              headerShown: false,
+              animation: 'slide_from_right'
+            }} 
+            />
+            <Stack.Screen 
+              name="SubTelas/conta_premium" 
+              options={{ 
+                headerShown: false,
+                animation: 'slide_from_right'
+              }} 
+              />
+              <Stack.Screen 
+                name="SubTelas/MediaGallery" 
+                options={{ 
+                  headerShown: false,
+                  animation: 'slide_from_right'
+                }} 
+                />
+                <Stack.Screen 
+                  name="SubTelas/SearchMessages" 
+                  options={{ 
+                    headerShown: false,
+                    animation: 'slide_from_right'
+                  }} 
+                />
+                <Stack.Screen 
+                  name="SubTelas/configuracoes_admin" 
+                  options={{ 
+                    headerShown: false,
+                    animation: 'slide_from_right'
+                  }} 
+                />
       </Stack>
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>

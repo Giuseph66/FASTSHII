@@ -18,7 +18,7 @@ import { Colors } from '@/constants/Colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { firestore } from '@/firebaseConfig';
-import { collection, query, where, getDocs, orderBy, getDoc, doc, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, getDoc, doc, addDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BlockUserModal from '@/components/BlockUserModal';
@@ -46,6 +46,7 @@ interface User {
   followers?: string[];
   following?: string[];
   username?: string;
+  uid?: string;
 }
 
 const UserProfileScreen = () => {
@@ -145,14 +146,39 @@ const UserProfileScreen = () => {
   };
 
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      await fetchUserProfile();
-      await fetchUserPosts();
-      setLoading(false);
-    };
-    loadData();
+    // Carrega dados iniciais (perfil, posts, myUser, isMe)
+    fetchUserProfile();
+    fetchUserPosts();
+    setLoading(false);
   }, [userid]);
+
+  useEffect(() => {
+    // Atualização em tempo real do perfil
+    let unsubscribe: (() => void) | null = null;
+    const listenProfile = async () => {
+      if (!userid) return;
+      const userRef = doc(firestore, 'usuarios', userid as string);
+      unsubscribe = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as User;
+          setProfile({ ...userData, id: docSnap.id });
+        }
+      });
+    };
+    listenProfile();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [userid]);
+
+  useEffect(() => {
+    // Atualiza o estado do botão de seguir em tempo real
+    if (!profile || !myUser) {
+      setIsFollowing(false);
+      return;
+    }
+    setIsFollowing(!!profile.followers?.includes(myUser.uid || ''));
+  }, [profile, myUser]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -162,8 +188,41 @@ const UserProfileScreen = () => {
   };
 
   const handleFollow = async () => {
-    // Implementar lógica de seguir/deixar de seguir
-    setIsFollowing(prev => !prev);
+    if (!profile || !myUser) {
+      setCustomAlert({
+        visible: true,
+        title: 'Erro',
+        message: 'Não foi possível identificar os usuários para seguir/deixar de seguir.',
+        buttons: [
+          { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
+        ]
+      });
+      return;
+    };
+    const userToFollowRef = doc(firestore, 'usuarios', profile.id);
+    const myUserRef = doc(firestore, 'usuarios', myUser.uid || '');
+    try {
+      if (isFollowing) {
+        await updateDoc(userToFollowRef, {
+          followers: arrayRemove(myUser.uid)
+        });
+        await updateDoc(myUserRef, {
+          following: arrayRemove(profile.id)
+        });
+        setIsFollowing(false);
+      } else {
+        // Seguir
+        await updateDoc(userToFollowRef, {
+          followers: arrayUnion(myUser.uid)
+        });
+        await updateDoc(myUserRef, {
+          following: arrayUnion(profile.id)
+        });
+        setIsFollowing(true);
+      }
+    } catch (error) {
+      console.error('Erro ao seguir/deixar de seguir:', error);
+    }
   };
 
   const handleBlockUser = () => {
@@ -399,7 +458,7 @@ const UserProfileScreen = () => {
                   color="#fff" 
                   style={styles.actionButtonIcon}
                 />
-                <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                <Text style={[styles.actionButtonText, { color: isFollowing ? themeColors.textSearch : themeColors.textSeguir }]}>
                   {isFollowing ? 'Seguindo' : 'Seguir'}
                 </Text>
               </TouchableOpacity>)}
@@ -423,7 +482,7 @@ const UserProfileScreen = () => {
                   style={styles.actionButtonIcon}
                 />
                 )}
-                <Text style={[styles.actionButtonText, { color: '#fff' }]}>
+                <Text style={[styles.actionButtonText, { color: themeColors.textSearch }]}>
                   {loading_message ? 'Abrindo conversa...' : 'Mensagem'}
                 </Text>
               </TouchableOpacity>
@@ -508,10 +567,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   profileHeaderContainer: {
-    marginTop: 35,
+    marginTop: 0,
   },
   profileHeaderGradient: {
-    paddingTop: 60,
+    paddingTop:  StatusBar.currentHeight ? StatusBar.currentHeight + 60 : 60,
     paddingBottom: 20,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,

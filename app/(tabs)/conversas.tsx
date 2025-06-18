@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   useColorScheme,
   TextInput,
+  StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -256,7 +257,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignSelf: 'center',
     paddingHorizontal: 20,
-    marginTop: 45,
+    marginTop: StatusBar.currentHeight,
     borderRadius: 15,
     shadowColor: '#000',
     shadowOffset: {

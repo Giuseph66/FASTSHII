@@ -31,7 +31,8 @@ interface User {
   password: string;
   user: string;
   blockedUsers: string[];
-}
+  conta: string;
+  }
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme(); // Detect system theme
@@ -88,7 +89,7 @@ export default function LoginScreen() {
         setCustomAlert({
           visible: true,
           title: 'Usuário não encontrado',
-          message: 'Deseja se cadastrar com este e-mail?',
+          message: 'Deseja se cadastrar com este e-mail e senha?',
           buttons: [
             { text: 'Cancelar', style: 'cancel', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) },
             { text: 'Cadastrar', style: 'default', onPress: () => {
@@ -109,7 +110,7 @@ export default function LoginScreen() {
         setCustomAlert({
           visible: true,
           title: 'Erro',
-          message: 'Senha incorreta.',
+          message: 'Senha ou e-mail incorreto.',
           buttons: [
             { text: 'OK', style: 'default', onPress: () => setCustomAlert(prev => ({ ...prev, visible: false })) }
           ]
@@ -122,7 +123,8 @@ export default function LoginScreen() {
         email: userData.email,
         password: userData.password,
         user: userData.user,
-        blockedUsers: userData.blockedUsers || []
+        blockedUsers: userData.blockedUsers || [],
+        conta: userData.conta || 'N'
       };
 
       // Armazena dados do usuário no AsyncStorage
@@ -132,7 +134,8 @@ export default function LoginScreen() {
           email: user.email,
           uid: user.id,
           username: user.user,
-          blockedUsers: user.blockedUsers
+          blockedUsers: user.blockedUsers,
+          conta: user.conta || 'N'
         })
       );
 

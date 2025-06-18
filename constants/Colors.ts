@@ -12,6 +12,7 @@ export const Colors = {
   light: {
     text: '#000', // Black text
     textSearch: '#000',
+    textSeguir: '#fff',
     background: '#FFFFFF', // White background
     backgroundfraco : 'rgba(0, 0, 0, 0.17)',
     backgroundfundoemoji : 'rgba(0, 50, 116, 0.74)',
@@ -26,6 +27,7 @@ export const Colors = {
   dark: {
     text: '#000', // Light text
     textSearch: '#fff',
+    textSeguir: '#000',
     background: '#151718', // Dark background
     backgroundfraco : 'rgba(255,255,255,0.05)',
     backgroundfundoemoji : 'rgba(161, 62, 4, 0.66)',
