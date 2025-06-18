@@ -23,6 +23,7 @@ import CustomAlert, { CustomAlertButton } from '@/components/CustomAlert';
 import DatePicker from '@/components/DatePicker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
+
 import * as Device from 'expo-device';
 import * as Application from 'expo-application';
 
@@ -79,6 +80,7 @@ const AdminContratosScreen = () => {
 
 
   const getDeviceAdminKey = async () => {
+    try {
     const brand = Device.brand;
     const model = Device.modelName;
     const os = Device.osName;
@@ -86,6 +88,10 @@ const AdminContratosScreen = () => {
   
     const deviceKey = `${brand}-${model}-${os}-${androidId}`;
     return deviceKey;
+    } catch (error) {
+      console.error('Erro ao obter chave do dispositivo:', error);
+      return 'unknown';
+    }
   };
 
     const loadContracts = async () => {

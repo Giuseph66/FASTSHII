@@ -23,7 +23,6 @@ export const comoFunciona = [
     description: 'Após inserir os detalhes, o usuário poderá solicitar um orçamento. Nesse momento, ele visualizará:',
     items: [
       'A quantidade máxima de visualizações por dia',
-      'A quantidade mínima de visualizações é de 10 .',
       'A possibilidade de selecionar o número desejado de visualizações',
       'O sistema calculará automaticamente o valor com base na taxa fixa de R$ 0,01 por visualização'
     ],
@@ -37,6 +36,7 @@ export const comoFunciona = [
     description: 'O usuário deverá informar:',
     items: [
       'O público-alvo desejado',
+      'O método de pagamento (com acréscimo de 5% para cartão de crédito)',
       'Uma ou mais imagens para o anúncio',
       'Um ou mais links relacionados ao conteúdo anunciado'
     ]

@@ -1,54 +1,46 @@
 export const termosContrato = [
   {
-    title: '1. Objetivo e Escopo',
-    desc: 'Estes Termos de Uso regulam a utilização do aplicativo e de suas funcionalidades, descrevendo os direitos, deveres e responsabilidades dos usuários e da plataforma, além de definir os serviços oferecidos e suas limitações.'
+    title: 'PARTES',
+    desc: `FASTSHIII, doravante denominada simplesmente "Plataforma", desenvolvida por acadêmicos de Engenharia de Computação da Faculdade Fastech, responsável por oferecer espaço digital para publicação de conteúdos anônimos e patrocinados, e\nAnunciante, pessoa jurídica devidamente inscrita no CNPJ fornecido no ato da contratação, doravante denominado "Contratante".\n\nAo aceitar este contrato, o Contratante declara ter lido, compreendido e aceitado integralmente as condições abaixo.`
   },
   {
-    title: '2. Aceitação dos Termos',
-    desc: 'Ao utilizar o aplicativo, o usuário declara ter lido, compreendido e aceitado integralmente os presentes Termos de Uso. A continuidade do uso após atualizações será considerada como nova aceitação automática.'
+    title: 'CLÁUSULA 1 – OBJETO',
+    desc: 'O presente contrato tem por objeto a contratação de espaço publicitário na plataforma FastShiii, por meio de publicações patrocinadas personalizadas, cujos parâmetros de exibição serão definidos pelo próprio Contratante no ato da solicitação.'
   },
   {
-    title: '3. Cadastro e Conta',
-    desc: 'Para acesso a determinadas funcionalidades, o usuário poderá precisar criar uma conta. É de sua inteira responsabilidade fornecer informações verdadeiras e manter suas credenciais seguras, não compartilhando com terceiros.'
+    title: 'CLÁUSULA 2 – REQUISITOS OBRIGATÓRIOS',
+    desc: `Para efetuar a publicação de um anúncio, o Contratante deverá obrigatoriamente fornecer:\n• Número de CNPJ válido.\n• Descrição completa do Anúncio.\n• Imagens associadas (quando aplicável).\n• Links externos relacionados ao anúncio (quando aplicável).\n• Parâmetros personalizados de exibição, incluindo, mas não se limitando a:\n  o Duração da campanha.\n  o Frequência de exibição.`
   },
   {
-    title: '4. Privacidade e Uso de Dados',
-    desc: 'O aplicativo poderá coletar dados do dispositivo e de uso para personalizar a experiência e exibir anúncios mais relevantes. O usuário consente com essa coleta e com o eventual compartilhamento de dados anonimizados com terceiros, conforme Política de Privacidade.'
+    title: 'CLÁUSULA 3 – POLÍTICA DE VALORAÇÃO',
+    desc: `O custo da publicação será calculado de forma dinâmica e personalizada, com base nos seguintes fatores:\n• Período de veiculação.\n• Frequência desejada.\n• Formatos e mídias utilizadas.\n\nO valor total será apresentado ao Contratante no momento da configuração do anúncio, antes da confirmação da contratação.`
   },
   {
-    title: '5. Uso Aceitável',
-    desc: 'O usuário compromete-se a utilizar o aplicativo de forma ética, legal e respeitosa, abstendo-se de publicar conteúdos ofensivos, falsos, discriminatórios ou que violem qualquer direito de terceiros ou da legislação vigente.'
+    title: 'CLÁUSULA 4 – OBRIGAÇÕES DO CONTRATANTE',
+    desc: `O Contratante se compromete a:\n• Fornecer informações verídicas e atualizadas, incluindo o CNPJ.\n• Garantir que os conteúdos (textos, imagens, links) estejam em conformidade com as legislações vigentes, não infrinjam direitos autorais, não promovam discurso de ódio, violência ou conteúdos ilícitos.\n• Respeitar a Política de Privacidade e os Termos de Uso da plataforma FastShiii.`
   },
   {
-    title: '6. Conteúdo de Terceiros',
-    desc: 'O aplicativo pode conter links, anúncios ou conteúdos de terceiros, cuja responsabilidade é exclusivamente dos respectivos autores. A plataforma não se responsabiliza por danos ou prejuízos decorrentes de tais conteúdos.'
+    title: 'CLÁUSULA 5 – OBRIGAÇÕES DA PLATAFORMA',
+    desc: `A Plataforma se compromete a:\n• Veicular os anúncios conforme os parâmetros definidos e acordados.\n• Garantir os melhores esforços para a correta entrega do anúncio ao público especificado.`
   },
   {
-    title: '7. Propriedade Intelectual',
-    desc: 'Todos os direitos sobre a marca, nome, layout, códigos e demais elementos do aplicativo pertencem à plataforma. O conteúdo gerado pelos usuários poderá ser utilizado para fins internos, respeitando os termos da Política de Privacidade.'
+    title: 'CLÁUSULA 6 – PAGAMENTO',
+    desc: `• O pagamento deverá ser realizado no momento da confirmação da publicação do anúncio.\n• O valor será apresentado de forma transparente antes da finalização.\n• O não pagamento implicará no cancelamento automático da solicitação de veiculação.`
   },
   {
-    title: '8. Modificações no Serviço',
-    desc: 'A plataforma poderá, a seu critério, alterar, suspender ou descontinuar funcionalidades do aplicativo a qualquer momento, sem necessidade de aviso prévio, desde que não haja prejuízo direto a direitos adquiridos.'
+    title: 'CLÁUSULA 7 – CANCELAMENTO E REEMBOLSO',
+    desc: `• O Contratante poderá cancelar a campanha antes de sua ativação sem qualquer custo.\n• Após a ativação, o cancelamento poderá ser solicitado, mas os valores proporcionais ao período de exibição já realizado não serão reembolsados.\n• Reembolsos somente serão realizados em casos de falha comprovada da plataforma na entrega da campanha conforme os parâmetros contratados.`
   },
   {
-    title: '9. Limitação de Responsabilidade',
-    desc: 'A plataforma não se responsabiliza por perdas, danos diretos ou indiretos decorrentes da utilização do aplicativo, falhas técnicas, indisponibilidades temporárias ou mau uso por parte do usuário.'
+    title: 'CLÁUSULA 8 – RESPONSABILIDADE',
+    desc: `• A Plataforma não se responsabiliza pelo conteúdo do anúncio, sendo este de total responsabilidade do Contratante.\n• A Plataforma reserva-se o direito de suspender ou rejeitar anúncios que violem as políticas internas, legislações vigentes ou que sejam considerados inadequados à comunidade FastShiii.`
   },
   {
-    title: '10. Foro e Resolução de Conflitos',
-    desc: 'Fica eleito o foro da comarca de São Paulo – SP para dirimir quaisquer dúvidas ou conflitos oriundos destes termos, com renúncia expressa a qualquer outro foro, por mais privilegiado que seja.'
+    title: 'CLÁUSULA 9 – VIGÊNCIA',
+    desc: 'Este contrato terá validade a partir da aceitação do Contratante e permanecerá vigente enquanto durar a campanha publicitária, sem prejuízo das responsabilidades pós-veiculação.'
   },
   {
-    title: '11. Anúncios e Monetização',
-    desc: 'Anunciantes devem seguir nossas diretrizes. Os usuários podem visualizar anúncios personalizados com base em dados de uso.'
-  },
-  {
-    title: '12. Dados do Dispositivo e Análise',
-    desc: 'Coletamos dados anonimizados do dispositivo para fins de desempenho e publicidade.'
-  },
-  {
-    title: '13. Foro e Resolução de Conflitos',
-    desc: 'Fica eleito o foro da comarca de São Paulo/SP para resolver quaisquer conflitos jurídicos.'
+    title: 'CLÁUSULA 10 – FORO',
+    desc: 'Fica eleito o foro da comarca de Sinop-MT para dirimir quaisquer questões oriundas deste contrato, com exclusão de qualquer outro, por mais privilegiado que seja.'
   }
 ]; 

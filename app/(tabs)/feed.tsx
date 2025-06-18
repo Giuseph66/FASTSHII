@@ -124,6 +124,7 @@ interface MentionSuggestion {
   id: string;
   username: string;
   user: string;
+  conta: string;
 }
 
 const CACHE_KEY = 'cached_images';
@@ -1489,10 +1490,17 @@ const FastShiiiScreen = () => {
           return {
             id: doc.id,
             username: data.username || '',
-            user: data.user || ''
+            user: data.user || '',
+            conta: data.conta || 'N'
           } as MentionSuggestion;
         });
         setAllUsers(users);
+        for (const useraq of users) {
+          if (useraq.id === user?.uid) {
+            setUser(prev => ({ ...prev, conta: useraq.conta }));
+            await AsyncStorage.setItem('user', JSON.stringify({ ...user, conta: useraq.conta }));
+            break;
+        }}
       } catch (error) {
         console.error('Erro ao carregar usuários:', error);
       }

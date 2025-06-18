@@ -1,3 +1,4 @@
+/* eslint-disable no-use-before-define */
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -117,13 +118,13 @@ const PremiumScreen = () => {
         { 
           text: 'Cancelar', 
           style: 'cancel',
-          onPress: () => setCustomAlert(prev => ({ ...prev, visible: false }))
+          onPress: () => setCustomAlert((prev: any) => ({ ...prev, visible: false }))
         },
         { 
           text: 'Continuar',
           style: 'default',
           onPress: () => {
-            setCustomAlert(prev => ({ ...prev, visible: false }));
+            setCustomAlert((prev: any) => ({ ...prev, visible: false }));
             // Aqui você implementaria a integração com o gateway de pagamento
             console.log('Processando pagamento para o plano:', selectedPlan);
             pagar(selectedPlan);
@@ -204,14 +205,7 @@ const PremiumScreen = () => {
       loadPlan();
     }, []);
 
-  const mudaConta = async (conta : string) => {
-    const user = await AsyncStorage.getItem('user');
-    if (!user) return;
-    const userData = JSON.parse(user);
-      userData.conta = conta;
-    console.log('userData', userData);
-    await AsyncStorage.setItem('user', JSON.stringify(userData));
-  };
+
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -250,7 +244,7 @@ const PremiumScreen = () => {
 
             {/* Plan Cards */}
             <View style={styles.plansContainer}>
-              {Object.values(plans).map((plan) => (
+              {(Object.values(plans) as Plan[]).map((plan: Plan) => (
                 <TouchableOpacity
                   key={plan.id}
                   style={[
@@ -263,7 +257,6 @@ const PremiumScreen = () => {
                   ]}
                   onPress={() => {
                     setSelectedPlan(plan.id as PlanType);
-                    mudaConta(plan.conta);
                   }}
                 >
                   <View style={styles.planHeader}>
@@ -293,7 +286,7 @@ const PremiumScreen = () => {
                   </Text>
 
                   <View style={styles.featuresList}>
-                    {plan.features.map((feature, index) => (
+                    {plan.features.map((feature: string, index: number) => (
                       <View key={index} style={styles.featureItem}>
                         <Ionicons 
                           name="checkmark-circle" 
@@ -334,12 +327,7 @@ const PremiumScreen = () => {
               </Text>
             </View>
             
-            <TouchableOpacity style={styles.cancelButton} onPress={() => {
-              mudaConta('N');
-              setSelectedPlan('n');
-            }}>
-              <Text style={styles.cancelButtonText}>Cancelar Assinatura</Text>
-            </TouchableOpacity>
+
           </View>
         </ScrollView>
       </LinearGradient>
@@ -349,7 +337,7 @@ const PremiumScreen = () => {
         title={customAlert.title}
         message={customAlert.message}
         buttons={customAlert.buttons}
-        onRequestClose={() => setCustomAlert(prev => ({ ...prev, visible: false }))}
+        onRequestClose={() => setCustomAlert((prev: any) => ({ ...prev, visible: false }))}
       />
     </View>
   );

@@ -39,13 +39,14 @@ interface User {
   email: string;
   uid: string;
   blockedUsers: BlockedUser[];
+  isAdmin: boolean;
 }
 
 const Profile15Screen = () => {
   const colorScheme = useColorScheme();
   const themeColors = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-  const [user, setUser] = useState<User>({ username: '', email: '', uid: '', blockedUsers: [] });
+  const [user, setUser] = useState<User>({ username: '', email: '', uid: '', blockedUsers: [], isAdmin: false });
   const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [blockedUsersModalVisible, setBlockedUsersModalVisible] = useState(false);
@@ -420,10 +421,11 @@ const Profile15Screen = () => {
           >
             <Ionicons name="log-out-outline" size={24} color={themeColors.tint} style={styles.optionIcon} />
             <Text style={[styles.logoutButtonText, { color: themeColors.tint }]}>Sair</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
+            { user.isAdmin && (
                 <TouchableOpacity
-                  style={[styles.optionCard, { backgroundColor: themeColors.background }]}
-                  onPress={() => router.push({
+                style={[styles.optionCard, { backgroundColor: themeColors.background }]}
+                onPress={() => router.push({
                     pathname: '/SubTelas/configuracoes_admin',
                   })}
                 >
@@ -431,6 +433,7 @@ const Profile15Screen = () => {
                   <Text style={[styles.optionText, { color: themeColors.googleButton }]}>Configurações Admin</Text>
                   <Ionicons name="chevron-forward" size={24} color={themeColors.icon} />
                 </TouchableOpacity>
+            )}
         </ScrollView>
 
         <Modal visible={editProfileModalVisible} transparent={true} animationType="slide">

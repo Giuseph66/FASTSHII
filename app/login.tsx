@@ -32,6 +32,7 @@ interface User {
   user: string;
   blockedUsers: string[];
   conta: string;
+  isAdmin: boolean;
   }
 
 export default function LoginScreen() {
@@ -124,7 +125,8 @@ export default function LoginScreen() {
         password: userData.password,
         user: userData.user,
         blockedUsers: userData.blockedUsers || [],
-        conta: userData.conta || 'N'
+        conta: userData.conta || 'N',
+        isAdmin: userData.isAdmin || false
       };
 
       // Armazena dados do usuário no AsyncStorage
@@ -135,7 +137,8 @@ export default function LoginScreen() {
           uid: user.id,
           username: user.user,
           blockedUsers: user.blockedUsers,
-          conta: user.conta || 'N'
+          conta: user.conta || 'N',
+          isAdmin: user.isAdmin || false
         })
       );
 
