@@ -19,28 +19,9 @@ interface TabBarIconProps {
 }
 
 export default function TabLayout() {
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme(); // Detect system theme
   const themeColors = Colors[colorScheme ?? 'light']; // Select theme colors
 
-
-  const tabBarStyle = {
-    backgroundColor: themeColors.background,
-    paddingBottom: insets.bottom,
-    shadowColor: themeColors.text,
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 5 },
-    shadowRadius: 10,
-    elevation: 5,
-    alignSelf: 'center',
-    width: '100%',
-    position: 'absolute',
-    bottom: 0,
-  };
-  
-
-
-  // Função auxiliar para renderizar o ícone com efeito dinâmico
   const renderTabIcon = (iconSource: any) => ({ color, size, focused }: TabBarIconProps) => (
     <View
       style={{
@@ -62,14 +43,18 @@ export default function TabLayout() {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <LinearGradient
-        colors={[themeColors.background, themeColors.background]}
-        style={[styles.gradient, { paddingBottom: insets.bottom }]}
-      >
         <Tabs
-
           screenOptions={{
+            tabBarStyle: {
+              backgroundColor: themeColors.background,
+              shadowColor: themeColors.text,
+              shadowOpacity: 0.1,
+              shadowOffset: { width: 0, height: 5 },
+              shadowRadius: 10,
+              alignSelf: 'center',
+              width: '100%',
+              position: 'absolute' as const,
+              bottom: 20,            },
             tabBarActiveTintColor: themeColors.tint,
             headerShown: false,
             tabBarButton: HapticTab,
@@ -77,17 +62,13 @@ export default function TabLayout() {
             tabBarLabelStyle: {
               fontSize: 13,
               fontWeight: 'bold',
-              marginTop: 10, 
+              top: 8,
             },
             tabBarItemStyle: {
               justifyContent: 'center',  // centraliza verticalmente
-              alignItems: 'center',      // centraliza horizontalmente
-              marginTop: 10, 
+              alignItems: 'center',   
+              bottom: 2, 
             },
-            tabBarStyle: Platform.select({
-              ios: tabBarStyle,
-              default: tabBarStyle,
-            }),
           }}>
           <Tabs.Screen
             name="Perfil"
@@ -95,32 +76,22 @@ export default function TabLayout() {
               title: translations[currentLanguage].tabs.profile,
               tabBarIcon: renderTabIcon(require('@/assets/icons/perfil.png')),
             }}
-          />
+            />
           <Tabs.Screen
             name="feed"
             options={{
               title: translations[currentLanguage].tabs.feed,
               tabBarIcon: renderTabIcon(require('@/assets/icons/SHH.png')),
             }}
-          />
+            />
           <Tabs.Screen
             name="conversas"
             options={{
               title: translations[currentLanguage].tabs.conversas,
               tabBarIcon: renderTabIcon(require('@/assets/icons/chat.png')),
             }}
-          />
+            />
         </Tabs>
-      </LinearGradient>
-    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-});
